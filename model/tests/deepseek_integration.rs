@@ -1,5 +1,4 @@
-use model::model::base::{Message, Model, OpenAIMessage};
-use model::model::deepseek::{DeepSeekModel, DeepseekArgs};
+use model::{Message, ModelTrait, OpenAiArgs, OpenAiModel, OpenAIMessage};
 use std::env;
 
 const BASE_URL: &str = "https://api.deepseek.com";
@@ -21,7 +20,7 @@ fn api_key() -> String {
 #[tokio::test]
 async fn test_deepseek_get_models() {
     let mut deepseek_model =
-        DeepSeekModel::new(BASE_URL, &api_key(), DeepseekArgs::new("deepseek-v4-pro"));
+        OpenAiModel::deepseek(BASE_URL, &api_key(), OpenAiArgs::deepseek("deepseek-v4-pro"));
     deepseek_model.get_models().await.unwrap();
 
     assert!(
@@ -41,7 +40,7 @@ async fn test_deepseek_get_models() {
 #[tokio::test]
 async fn test_deepseek_chat() {
     let deepseek_model =
-        DeepSeekModel::new(BASE_URL, &api_key(), DeepseekArgs::new("deepseek-v4-pro"));
+        OpenAiModel::deepseek(BASE_URL, &api_key(), OpenAiArgs::deepseek("deepseek-v4-pro"));
 
     let messages: Vec<OpenAIMessage> = vec![
         OpenAIMessage::new("system", "You are a helpful assistant."),

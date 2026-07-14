@@ -6,7 +6,10 @@ version = 4
 name = "agent"
 version = "0.1.0"
 dependencies = [
+ "model",
  "reqwest",
+ "tokio",
+ "tokio-test",
 ]
 
 [[package]]
