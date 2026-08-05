@@ -8,3 +8,4 @@ reqwest = {workspace = true}
 tokio = { workspace = true }
 tokio-test = {workspace = true}
 model = {workspace = true}
+plugin = {workspace = true}

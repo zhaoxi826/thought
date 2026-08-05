@@ -12,6 +12,9 @@ reqwest = { version = "0.13.4", features = ["json"] }
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = { version = "1.0.150", features = ["raw_value"] }
 futures = "0.3.32"
+async-trait = "0.1.83"
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter", "fmt"] }
 
 model = {path = "model"}
 agent = {path = "agent"}

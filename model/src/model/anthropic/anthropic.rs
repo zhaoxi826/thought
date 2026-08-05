@@ -6,6 +6,7 @@
 //! （`type Message = AnthropicMessage`）。
 
 use crate::model::base::{percent, AnthropicMessage, Error, Message, Model};
+use crate::model::tool::Function;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 
@@ -80,6 +81,13 @@ impl Model for AnthropicModel {
             system,
             temperature: self.args.temperature,
             top_p: self.args.top_p,
+            tools: self
+                .args
+                .tools
+                .iter()
+                .cloned()
+                .map(AnthropicTool::from)
+                .collect(),
             metadata: user_id.map(|id| Metadata {
                 user_id: id.to_owned(),
             }),
@@ -129,6 +137,28 @@ impl Model for AnthropicModel {
     }
 }
 
+/// Anthropic 请求里的工具条目（wire 类型）。
+///
+/// 由协议中立的 [`Function`] 转换而来，序列化为 Anthropic 格式（无 `type/function`
+/// 外层包裹）：`{ name, description, input_schema: {JSON Schema} }`。
+#[derive(Serialize, Debug, Clone)]
+pub struct AnthropicTool {
+    name: String,
+    description: String,
+    /// 参数的 JSON Schema 对象，由 [`Function::schema_object`] 生成。
+    input_schema: serde_json::Value,
+}
+
+impl From<Function> for AnthropicTool {
+    fn from(f: Function) -> Self {
+        Self {
+            input_schema: f.schema_object(),
+            name: f.name,
+            description: f.description,
+        }
+    }
+}
+
 /// Anthropic 预存调用参数。
 #[derive(Clone, Debug)]
 pub struct AnthropicArgs {
@@ -146,6 +176,9 @@ pub struct AnthropicArgs {
 
     /// top-p 采样参数，内部用 0-100 的 u8 表示 0.0-1.0，序列化时自动除 100。
     pub top_p: u8,
+
+    /// 工具列表（协议中立的 [`Function`]，构造请求时转成 wire 类型）。
+    pub tools: Vec<Function>,
 }
 
 impl Default for AnthropicArgs {
@@ -156,6 +189,7 @@ impl Default for AnthropicArgs {
             system: None,
             temperature: 100,
             top_p: 100,
+            tools: Vec::new(),
         }
     }
 }
@@ -187,6 +221,11 @@ impl AnthropicArgs {
         self.top_p = top_p;
         self
     }
+
+    pub fn tools(mut self, tools: Vec<Function>) -> Self {
+        self.tools = tools;
+        self
+    }
 }
 
 // `/v1/messages` 请求结构
@@ -205,6 +244,9 @@ struct MessagesRequest<'a> {
 
     #[serde(with = "percent")]
     top_p: u8,
+
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    tools: Vec<AnthropicTool>,
 
     #[serde(skip_serializing_if = "Option::is_none")]
     metadata: Option<Metadata>,

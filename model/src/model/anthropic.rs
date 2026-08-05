@@ -5,4 +5,6 @@
 #[allow(clippy::module_inception)]
 pub mod anthropic;
 
-pub use anthropic::{AnthropicArgs, AnthropicModel, ANTHROPIC_BASE_URL, DEFAULT_MAX_TOKENS};
+pub use anthropic::{
+    AnthropicArgs, AnthropicModel, AnthropicTool, ANTHROPIC_BASE_URL, DEFAULT_MAX_TOKENS,
+};

@@ -5,8 +5,8 @@
 //! 选到 `Deepseek` 变体、多带思考字段——其预设在同包的 [`super::deepseek`] 里。
 
 use crate::model::base::{percent, Error, Model, OpenAIMessage};
+use crate::model::tool::Function;
 use reqwest::Client;
-use serde::ser::SerializeMap;
 use serde::{Deserialize, Serialize};
 
 pub const OPENAI_BASE_URL: &str = "https://api.openai.com";
@@ -41,9 +41,9 @@ pub struct ChatRequest {
     #[serde(with = "percent")]
     pub top_p: u8,
 
-    /// 工具列表。
+    /// 工具列表（wire 类型）。
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub tools: Vec<Tool>,
+    pub tools: Vec<OpenaiTool>,
 
     /// 用户标识，按需使用。
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -162,133 +162,40 @@ pub enum ToolChoice {
     Function { name: String },
 }
 
-/// 工具定义。
-#[derive(Deserialize, Debug, Clone)]
-pub enum Tool {
-    Function(Function),
-}
-
-impl Serialize for Tool {
-    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        let Tool::Function(func) = self;
-        let mut map = serializer.serialize_map(Some(2))?;
-        map.serialize_entry("type", "function")?;
-        map.serialize_entry("function", &func.to_tool_function())?;
-        map.end()
-    }
-}
-
-/// 工具函数定义。
+/// OpenAI 请求里的工具条目（wire 类型）。
 ///
-/// 序列化时自动展开为 OpenAI 兼容的 JSON Schema 格式：
-/// ```json
-/// {
-///   "type": "object",
-///   "properties": { ... },
-///   "required": [ ... ]
-/// }
-/// ```
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct Function {
-    pub name: String,
-    pub description: String,
-    pub parameters: Vec<Parameter>,
+/// 由协议中立的 [`Function`] 转换而来，序列化为 OpenAI 格式：
+/// `{ "type": "function", "function": { name, description, parameters, strict } }`。
+#[derive(Serialize, Debug, Clone)]
+pub struct OpenaiTool {
+    #[serde(rename = "type")]
+    kind: &'static str,
+    function: OpenaiFunctionDef,
+}
+
+/// OpenAI `tool.function` 子对象。
+#[derive(Serialize, Debug, Clone)]
+struct OpenaiFunctionDef {
+    name: String,
+    description: String,
+    /// 参数的 JSON Schema 对象，由 [`Function::schema_object`] 生成。
+    parameters: serde_json::Value,
 
     #[serde(skip_serializing_if = "std::ops::Not::not")]
-    pub strict: bool,
+    strict: bool,
 }
 
-/// 工具函数参数定义。
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct Parameter {
-    pub name: String,
-    pub description: String,
-    pub r#type: ParameterType,
-
-    /// 是否必填。默认 true。
-    ///
-    /// 在 `parameters.required` 数组中，只有 `required = true` 的参数名会被加入。
-    #[serde(skip)]
-    pub required: bool,
-}
-
-impl Default for Parameter {
-    fn default() -> Self {
+impl From<Function> for OpenaiTool {
+    fn from(f: Function) -> Self {
         Self {
-            name: String::new(),
-            description: String::new(),
-            r#type: ParameterType::String,
-            required: true,
-        }
-    }
-}
-
-/// 参数类型。
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub enum ParameterType {
-    #[serde(rename = "string")]
-    String,
-
-    #[serde(rename = "integer")]
-    Integer,
-
-    #[serde(rename = "number")]
-    Number,
-
-    #[serde(rename = "boolean")]
-    Boolean,
-
-    #[serde(rename = "array")]
-    Array,
-
-    #[serde(rename = "object")]
-    Object,
-}
-
-impl Function {
-    /// 转换为 OpenAI 兼容的 `tool` 条目：包含 `type` 和 `function`。
-    pub fn to_tool(&self) -> serde_json::Value {
-        serde_json::json!({
-            "type": "function",
-            "function": self.to_tool_function(),
-        })
-    }
-
-    /// 转换为 OpenAI 兼容的 function 对象。
-    pub fn to_tool_function(&self) -> serde_json::Value {
-        let mut properties = std::collections::HashMap::<String, serde_json::Value>::new();
-        let mut required = Vec::<String>::new();
-
-        for param in &self.parameters {
-            let type_str = serde_json::to_value(&param.r#type)
-                .unwrap_or_else(|_| serde_json::Value::String("string".to_owned()))
-                .as_str()
-                .unwrap_or("string")
-                .to_owned();
-
-            properties.insert(
-                param.name.clone(),
-                serde_json::json!({
-                    "type": type_str,
-                    "description": param.description,
-                }),
-            );
-
-            if param.required {
-                required.push(param.name.clone());
-            }
-        }
-
-        serde_json::json!({
-            "name": self.name,
-            "description": self.description,
-            "parameters": {
-                "type": "object",
-                "properties": properties,
-                "required": required,
+            kind: "function",
+            function: OpenaiFunctionDef {
+                parameters: f.schema_object(),
+                name: f.name,
+                description: f.description,
+                strict: f.strict,
             },
-            "strict": self.strict,
-        })
+        }
     }
 }
 
@@ -516,8 +423,8 @@ pub struct OpenAiArgs {
     /// top-p 采样参数，内部用 0-100 的 u8 表示 0.0-1.0，序列化时自动除 100。
     pub top_p: u8,
 
-    /// 工具列表。
-    pub tools: Vec<Tool>,
+    /// 工具列表（协议中立的 [`Function`]，构造请求时转成 wire 类型）。
+    pub tools: Vec<Function>,
 
     /// 第二层 vendor 及其特有字段。
     pub vendor: OpenAiVendor,
@@ -549,7 +456,7 @@ impl OpenAiArgs {
         self
     }
 
-    pub fn tools(mut self, tools: Vec<Tool>) -> Self {
+    pub fn tools(mut self, tools: Vec<Function>) -> Self {
         self.tools = tools;
         self
     }
@@ -588,7 +495,7 @@ impl OpenAiArgs {
             stream: false,
             temperature: self.temperature,
             top_p: self.top_p,
-            tools: self.tools.clone(),
+            tools: self.tools.iter().cloned().map(OpenaiTool::from).collect(),
             user_id: None,
             vendor: self.vendor.clone(),
         }

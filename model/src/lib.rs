@@ -5,14 +5,17 @@ pub use model::base::{
     AnthropicMessage, Error, Message, Model as ModelTrait, OpenAIMessage,
 };
 
+// 协议中立的工具定义
+pub use model::tool::{Function, Parameter, ParameterType};
+
 // OpenAI Chat Completions（DeepSeek 为其预设）
 pub use model::openai::{
-    OpenAiArgs, OpenAiModel, OpenAiVendor, Thinking, ThinkingConfig, ThinkingType,
+    OpenAiArgs, OpenAiModel, OpenAiVendor, OpenaiTool, Thinking, ThinkingConfig, ThinkingType,
     DEEPSEEK_BASE_URL, OPENAI_BASE_URL,
 };
 
 // Anthropic Messages
-pub use model::anthropic::{AnthropicArgs, AnthropicModel, ANTHROPIC_BASE_URL};
+pub use model::anthropic::{AnthropicArgs, AnthropicModel, AnthropicTool, ANTHROPIC_BASE_URL};
 
 /// 顶层模型枚举，按协议统一封装两大接口。
 ///

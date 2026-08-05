@@ -8,7 +8,6 @@ pub mod openai;
 pub mod deepseek;
 
 pub use openai::{
-    ChatRequest, ChatResponse, Function, OpenAiArgs, OpenAiModel, OpenAiVendor, Parameter,
-    ParameterType, ResponseFormat, Thinking, ThinkingConfig, ThinkingType, Tool, ToolChoice,
-    DEEPSEEK_BASE_URL, OPENAI_BASE_URL,
+    ChatRequest, ChatResponse, OpenAiArgs, OpenAiModel, OpenAiVendor, OpenaiTool, ResponseFormat,
+    Thinking, ThinkingConfig, ThinkingType, ToolChoice, DEEPSEEK_BASE_URL, OPENAI_BASE_URL,
 };
