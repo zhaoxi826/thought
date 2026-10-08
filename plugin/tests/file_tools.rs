@@ -46,17 +46,26 @@ async fn write_file_reports_io_errors() {
 
 #[tokio::test]
 async fn run_command_returns_exit_code_and_output() {
-    let ok = RunCommand.call(r#"{"command": "echo hello"}"#).await;
+    let ok = RunCommand::default().call(r#"{"command": "echo hello"}"#).await;
     assert!(ok.contains("exit code: 0"), "result: {ok}");
     assert!(ok.contains("hello"), "result: {ok}");
 
-    let fail = RunCommand.call(r#"{"command": "exit 3"}"#).await;
+    let fail = RunCommand::default().call(r#"{"command": "exit 3"}"#).await;
     assert!(fail.contains("exit code: 3"), "result: {fail}");
 }
 
 #[tokio::test]
+async fn run_command_times_out() {
+    let tool = RunCommand {
+        timeout: std::time::Duration::from_millis(100),
+    };
+    let result = tool.call(r#"{"command": "sleep 5"}"#).await;
+    assert!(result.contains("timed out"), "result: {result}");
+}
+
+#[tokio::test]
 async fn invalid_arguments_are_reported_as_text() {
-    let result = RunCommand.call("not json").await;
+    let result = RunCommand::default().call("not json").await;
     assert!(result.contains("invalid arguments"), "result: {result}");
 }
 

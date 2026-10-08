@@ -7,7 +7,20 @@ use tokio::process::Command;
 use tracing::error;
 
 /// 命令执行工具：通过 `sh -c` 运行命令，返回退出码与 stdout/stderr。
-pub struct RunCommand;
+///
+/// 超时后子进程被杀掉（`kill_on_drop`），避免挂住的命令永久占用 agent。
+/// 注意：没有沙箱，命令以宿主进程的权限运行。
+pub struct RunCommand {
+    pub timeout: std::time::Duration,
+}
+
+impl Default for RunCommand {
+    fn default() -> Self {
+        Self {
+            timeout: std::time::Duration::from_secs(120),
+        }
+    }
+}
 
 /// `run_command` 的入参，从模型回传的 JSON 参数串反序列化而来。
 #[derive(Deserialize)]
@@ -44,7 +57,20 @@ impl Tool for RunCommand {
             }
         };
 
-        match Command::new("sh").arg("-c").arg(&args.command).output().await {
+        let child = Command::new("sh")
+            .arg("-c")
+            .arg(&args.command)
+            .stdin(std::process::Stdio::null())
+            .kill_on_drop(true)
+            .output();
+        let result = match tokio::time::timeout(self.timeout, child).await {
+            Ok(result) => result,
+            Err(_) => {
+                error!("command {:?} timed out", args.command);
+                return format!("command timed out after {}s", self.timeout.as_secs());
+            }
+        };
+        match result {
             Ok(output) => {
                 // code() 为 None 表示被信号终止
                 let status = match output.status.code() {

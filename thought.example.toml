@@ -1,0 +1,86 @@
+# thought 配置示例。复制为 thought.toml 后按需修改。
+# 密钥一律通过 *_env 从环境变量读取，不要把明文写进仓库。
+
+[http]
+# 默认只监听本机。对外暴露请放在带 TLS 的反向代理之后。
+bind = "127.0.0.1:8080"
+
+[auth]
+jwt_secret_env = "THOUGHT_JWT_SECRET"   # 至少 32 字节，如: openssl rand -hex 32
+token_ttl_secs = 43200
+
+# 首次启动且没有任何用户时创建管理员
+[auth.bootstrap_admin]
+username = "admin"
+password_env = "THOUGHT_ADMIN_PASSWORD"
+
+[storage]
+# 内嵌 SurrealKV。后端数据与记忆库共用这个文件。
+endpoint = "surrealkv://data/thought"
+namespace = "thought"
+database = "server"
+
+# ---- 模型池：agent 按名字引用 ----
+
+[models.deepseek]
+provider = "deepseek"
+model = "deepseek-v4-pro"
+api_key_env = "DEEPSEEK_API_KEY"
+
+[models.deepseek-flash]
+provider = "deepseek"
+model = "deepseek-v4-flash"
+api_key_env = "DEEPSEEK_API_KEY"
+thinking = false
+
+# [models.claude]
+# provider = "anthropic"
+# model = "claude-opus-4-8"
+# api_key_env = "ANTHROPIC_API_KEY"
+# max_tokens = 8192
+
+# ---- 记忆 ----
+
+# 向量化（可选）。缺省时记忆检索只用全文 + 图通道。
+# [embedding]
+# base_url = "https://api.siliconflow.cn/v1"
+# model = "BAAI/bge-m3"
+# dimension = 1024
+# api_key_env = "EMBEDDING_API_KEY"
+
+[memory]
+namespace = "thought"
+database = "memory"
+embedding_dimension = 1024
+extractor_model = "deepseek-flash"   # 三元组抽取用的模型
+per_user = true                      # 每个用户一个记忆空间
+save_user_messages = false           # 是否自动把每条用户消息写入记忆
+half_life_hours = 168.0
+
+# ---- agent ----
+
+[agent.controller]
+model = "deepseek"
+# 主控尽量只派单；这里只开放记忆工具（会话自动挂载，无需列出）
+tools = []
+
+[[agent.workers]]
+name = "coder"
+description = "Writes, reads and modifies code and files; runs shell commands to build and test."
+model = "deepseek"
+system = "You are a careful senior software engineer. Inspect before you change, keep changes minimal, and verify by running the build or tests."
+tools = ["read_file", "write_file", "delete_file", "run_command"]
+can_spawn = true
+
+[[agent.workers]]
+name = "researcher"
+description = "Answers questions by reading files and recalling long-term memory; does not modify anything."
+model = "deepseek-flash"
+system = "You research and summarize. Cite the files or memories you used."
+tools = ["read_file"]
+can_spawn = false
+
+[agent.limits]
+max_concurrent_tasks = 4
+subagent_max_turns = 30
+max_tool_output_chars = 32768

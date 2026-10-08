@@ -20,6 +20,6 @@ pub fn builtin_registry() -> Registry {
         .register(Arc::new(ReadFile))
         .register(Arc::new(WriteFile))
         .register(Arc::new(DeleteFile))
-        .register(Arc::new(RunCommand));
+        .register(Arc::new(RunCommand::default()));
     registry
 }
