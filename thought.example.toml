@@ -4,6 +4,8 @@
 [http]
 # 默认只监听本机。对外暴露请放在带 TLS 的反向代理之后。
 bind = "127.0.0.1:8080"
+# 静态前端目录（相对进程 cwd），同源托管在 /
+# web_dir = "web"
 
 [auth]
 jwt_secret_env = "THOUGHT_JWT_SECRET"   # 至少 32 字节，如: openssl rand -hex 32

@@ -20,6 +20,7 @@ model = { workspace = true }
 agent = { workspace = true }
 plugin = { workspace = true }
 symbol = { workspace = true }
+tower-http = { workspace = true }
 
 [dev-dependencies]
 tower = { workspace = true }

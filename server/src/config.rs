@@ -37,16 +37,27 @@ pub struct HttpConfig {
     /// 监听地址。默认只监听本机，对外暴露请放在反向代理（TLS）之后。
     #[serde(default = "default_bind")]
     pub bind: String,
+
+    /// 静态前端目录（相对进程 cwd），由服务器同源托管在 `/`。
+    #[serde(default = "default_web_dir")]
+    pub web_dir: String,
 }
 
 impl Default for HttpConfig {
     fn default() -> Self {
-        Self { bind: default_bind() }
+        Self {
+            bind: default_bind(),
+            web_dir: default_web_dir(),
+        }
     }
 }
 
 fn default_bind() -> String {
     "127.0.0.1:8080".to_owned()
+}
+
+fn default_web_dir() -> String {
+    "web".to_owned()
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]

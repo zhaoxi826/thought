@@ -27,6 +27,8 @@ pub(crate) struct Inner {
     pub memory_cfg: Option<MemorySection>,
     /// 模型配置（只读展示用，密钥不会被序列化）。
     pub models: BTreeMap<String, ModelConfig>,
+    /// 静态前端目录（SPA 兜底服务）。
+    pub web_dir: String,
     /// 活跃会话：session id → 句柄。
     pub sessions: Mutex<HashMap<String, LiveSession>>,
 }
@@ -69,6 +71,7 @@ impl AppState {
                 memory,
                 memory_cfg: config.memory.clone(),
                 models: config.models.clone(),
+                web_dir: config.http.web_dir.clone(),
                 sessions: Mutex::new(HashMap::new()),
             }),
             jwt: Arc::new(jwt),

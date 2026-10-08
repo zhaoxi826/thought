@@ -24,6 +24,7 @@ uuid = { version = "1.27.0", features = ["v4"] }
 toml = "1.1.7"
 tokio-stream = { version = "0.1.19", features = ["sync"] }
 tower = { version = "0.5", features = ["util"] }
+tower-http = { version = "0.6", features = ["fs"] }
 
 model = {path = "model"}
 agent = {path = "agent"}

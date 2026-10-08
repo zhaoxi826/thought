@@ -17,7 +17,7 @@
 //! | GET | /api/memory/search?q=&limit= | 检索记忆 |
 //! | DELETE | /api/memory/{id} | 删除记忆 |
 
-use crate::auth::{verify_password, AdminUser, AuthUser, Role};
+use crate::auth::{AdminUser, AuthUser, Role, verify_password};
 use crate::db::{SessionView, UserView};
 use crate::error::ApiError;
 use crate::state::AppState;
@@ -25,22 +25,31 @@ use agent::{AgentEvent, TaskInfo};
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::sse::{Event, KeepAlive, Sse};
-use axum::routing::{delete, get, post};
+use axum::routing::{any, delete, get, post};
 use axum::{Json, Router};
 use futures::Stream;
 use model::Message;
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::convert::Infallible;
 use symbol::{IngestRequest, IngestResult, Memory, MemoryHit, MemoryStore};
-use tokio_stream::wrappers::errors::BroadcastStreamRecvError;
-use tokio_stream::wrappers::BroadcastStream;
 use tokio_stream::StreamExt;
+use tokio_stream::wrappers::BroadcastStream;
+use tokio_stream::wrappers::errors::BroadcastStreamRecvError;
+use tower_http::services::{ServeDir, ServeFile};
 
 /// 单条消息 / 记忆的最大长度（字符）。
 const MAX_TEXT_CHARS: usize = 64 * 1024;
 
 pub fn router(state: AppState) -> Router {
+    // 静态前端：SPA 兜底到 index.html；未匹配的 /api/* 仍返回 JSON 404。
+    let web_dir = state.inner.web_dir.clone();
+    if !std::path::Path::new(&web_dir).is_dir() {
+        tracing::warn!(web_dir, "web dir does not exist; static frontend will 404");
+    }
+    let spa =
+        ServeDir::new(&web_dir).not_found_service(ServeFile::new(format!("{web_dir}/index.html")));
+
     Router::new()
         .route("/health", get(|| async { "ok" }))
         .route("/api/auth/login", post(login))
@@ -49,14 +58,25 @@ pub fn router(state: AppState) -> Router {
         .route("/api/models", get(list_models))
         .route("/api/agents", get(list_agents))
         .route("/api/sessions", get(list_sessions).post(create_session))
-        .route("/api/sessions/{id}", get(get_session).delete(delete_session))
+        .route(
+            "/api/sessions/{id}",
+            get(get_session).delete(delete_session),
+        )
         .route("/api/sessions/{id}/messages", post(send_message))
         .route("/api/sessions/{id}/events", get(session_events))
         .route("/api/sessions/{id}/tasks", get(session_tasks))
         .route("/api/memory", get(recent_memory).post(save_memory))
         .route("/api/memory/search", get(search_memory))
         .route("/api/memory/{id}", delete(delete_memory))
+        .route("/api", any(api_not_found))
+        .route("/api/{*_}", any(api_not_found))
+        .fallback_service(spa)
         .with_state(state)
+}
+
+/// 未匹配的 /api/* 返回与业务一致的 JSON 404，而不是 SPA 的 index.html。
+async fn api_not_found() -> (StatusCode, Json<Value>) {
+    (StatusCode::NOT_FOUND, Json(json!({ "error": "not found" })))
 }
 
 // ---- 认证 ----
@@ -74,11 +94,17 @@ struct LoginResponse {
     user: UserView,
 }
 
-async fn login(State(state): State<AppState>, Json(req): Json<LoginRequest>) -> Result<Json<LoginResponse>, ApiError> {
+async fn login(
+    State(state): State<AppState>,
+    Json(req): Json<LoginRequest>,
+) -> Result<Json<LoginResponse>, ApiError> {
     let user = state.db().find_user(&req.username).await?;
     // 用户不存在时也做一次哈希校验，避免通过响应时间探测用户名
     const DUMMY: &str = "$argon2id$v=19$m=19456,t=2,p=1$c29tZXNhbHRzb21lc2FsdA$7QjKqRZ6yEJfTOCLUL7t1cD3qNhEOHVGDl1b1mbVFkM";
-    let ok = verify_password(&req.password, user.as_ref().map_or(DUMMY, |u| &u.password_hash));
+    let ok = verify_password(
+        &req.password,
+        user.as_ref().map_or(DUMMY, |u| &u.password_hash),
+    );
     let user = match user {
         Some(user) if ok => user,
         _ => return Err(ApiError::unauthorized("invalid username or password")),
@@ -97,7 +123,10 @@ async fn me(AuthUser(claims): AuthUser) -> Json<Value> {
 
 // ---- 用户（admin） ----
 
-async fn list_users(State(state): State<AppState>, _: AdminUser) -> Result<Json<Vec<UserView>>, ApiError> {
+async fn list_users(
+    State(state): State<AppState>,
+    _: AdminUser,
+) -> Result<Json<Vec<UserView>>, ApiError> {
     Ok(Json(state.db().list_users().await?))
 }
 
@@ -118,7 +147,10 @@ async fn create_user(
     _: AdminUser,
     Json(req): Json<CreateUserRequest>,
 ) -> Result<(StatusCode, Json<UserView>), ApiError> {
-    let user = state.db().create_user(&req.username, &req.password, req.role).await?;
+    let user = state
+        .db()
+        .create_user(&req.username, &req.password, req.role)
+        .await?;
     Ok((StatusCode::CREATED, Json(user)))
 }
 
@@ -307,7 +339,9 @@ async fn search_memory(
     Query(query): Query<SearchQuery>,
 ) -> Result<Json<Vec<MemoryHit>>, ApiError> {
     let store = memory(&state, &user.sub).await?;
-    Ok(Json(store.search(&query.q, query.limit.clamp(1, 50)).await?))
+    Ok(Json(
+        store.search(&query.q, query.limit.clamp(1, 50)).await?,
+    ))
 }
 
 #[derive(Deserialize)]
@@ -346,7 +380,11 @@ async fn save_memory(
     let mut request = IngestRequest::new(req.content).source("api").tags(req.tags);
     request.external_id = req.external_id;
     let result = store.ingest(request).await?;
-    let status = if result.created { StatusCode::CREATED } else { StatusCode::OK };
+    let status = if result.created {
+        StatusCode::CREATED
+    } else {
+        StatusCode::OK
+    };
     Ok((status, Json(result)))
 }
 

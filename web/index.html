@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>thought</title>
+<link rel="stylesheet" href="/style.css">
+<link rel="icon" href="data:,">
+</head>
+<body>
+
+<!-- 登录视图 -->
+<div id="login-view" class="hidden">
+  <form id="login-form" class="login-card" autocomplete="off">
+    <div class="login-brand">thought</div>
+    <div class="login-sub">多 agent 系统</div>
+    <label class="field">
+      <span>用户名</span>
+      <input id="login-username" type="text" required autocomplete="username">
+    </label>
+    <label class="field">
+      <span>密码</span>
+      <input id="login-password" type="password" required autocomplete="current-password">
+    </label>
+    <div id="login-error" class="login-error hidden"></div>
+    <button id="login-submit" class="btn-primary" type="submit">登 录</button>
+  </form>
+</div>
+
+<!-- 应用壳 -->
+<div id="app" class="hidden">
+  <aside id="sidebar">
+    <div class="side-top">
+      <div class="brand-row">
+        <span class="brand">thought</span>
+      </div>
+      <button id="btn-new-session" class="btn-primary btn-block">＋ 新会话</button>
+      <nav class="side-tabs">
+        <button class="tab active" data-view="chat">会话</button>
+        <button class="tab" data-view="memory">记忆</button>
+        <button class="tab" data-view="system">系统</button>
+      </nav>
+    </div>
+    <div id="session-list" class="session-list"></div>
+    <div class="side-foot">
+      <div class="user-chip">
+        <span class="user-avatar" id="user-avatar"></span>
+        <span id="user-name" class="user-name"></span>
+        <span id="user-role" class="role-badge"></span>
+      </div>
+      <button id="btn-logout" class="btn-ghost">退出</button>
+    </div>
+  </aside>
+
+  <main id="main">
+    <!-- 会话视图 -->
+    <section id="view-chat" class="view">
+      <header class="topbar">
+        <button id="btn-sidebar-toggle" class="btn-ghost sidebar-toggle" title="侧栏">☰</button>
+        <span id="chat-title" class="chat-title">会话</span>
+        <span id="tasks-badge" class="tasks-badge hidden" title="运行中的任务"></span>
+        <span class="spacer"></span>
+        <span id="conn-dot" class="conn-dot" ></span>
+        <span id="conn-text" class="conn-text"></span>
+      </header>
+      <div id="messages" class="messages">
+        <div class="placeholder" id="chat-placeholder">选择左侧会话，或新建一个开始对话</div>
+      </div>
+      <div class="composer">
+        <textarea id="input" rows="1" placeholder="发送消息…（Enter 发送，Shift+Enter 换行）"></textarea>
+        <button id="btn-send" class="btn-primary">发送</button>
+      </div>
+    </section>
+
+    <!-- 记忆视图 -->
+    <section id="view-memory" class="view hidden">
+      <header class="topbar">
+        <span class="chat-title">记忆</span>
+      </header>
+      <div class="view-body">
+        <div id="memory-disabled" class="placeholder hidden">
+          记忆未启用。在服务端配置 <code>[memory]</code> 段后可用。
+        </div>
+        <div id="memory-body">
+          <form id="memory-write" class="memory-write">
+            <textarea id="memory-content" rows="2" placeholder="手动写入一条记忆…"></textarea>
+            <div class="memory-write-row">
+              <input id="memory-tags" type="text" placeholder="标签（逗号分隔，可空）">
+              <button class="btn-primary" type="submit">写入</button>
+            </div>
+            <div id="memory-write-msg" class="form-msg hidden"></div>
+          </form>
+          <div class="memory-tabs">
+            <button class="tab active" data-mtab="search">搜索</button>
+            <button class="tab" data-mtab="recent">最近</button>
+          </div>
+          <div id="memory-search-row">
+            <input id="memory-q" type="text" placeholder="搜索记忆…（回车）">
+          </div>
+          <div id="memory-list" class="memory-list"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 系统视图 -->
+    <section id="view-system" class="view hidden">
+      <header class="topbar">
+        <span class="chat-title">系统</span>
+      </header>
+      <div class="view-body" id="system-body"></div>
+    </section>
+  </main>
+</div>
+
+<script type="module" src="/js/app.js"></script>
+</body>
+</html>

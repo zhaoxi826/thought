@@ -54,6 +54,9 @@ export DEEPSEEK_API_KEY=sk-...
 cargo run --release -p thought-core -- thought.toml
 ```
 
+前端：`web/` 是纯静态 SPA（原生 HTML/CSS/ES modules，无构建步骤），由服务器同源托管在 `/`
+（静态目录由 `http.web_dir` 配置，默认 `./web`）。浏览器打开监听地址即可登录使用。
+
 ## HTTP 接口
 
 除 `GET /health` 和 `POST /api/auth/login`（`{username, password}` → `{token, expires_at, user}`）外，
