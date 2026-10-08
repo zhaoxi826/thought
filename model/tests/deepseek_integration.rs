@@ -1,4 +1,4 @@
-use model::{Message, ModelTrait, OpenAiArgs, OpenAiModel, OpenAIMessage};
+use model::{Message, ModelTrait, OpenAiArgs, OpenAiModel};
 use std::env;
 
 const BASE_URL: &str = "https://api.deepseek.com";
@@ -44,13 +44,13 @@ async fn test_deepseek_chat() {
     let deepseek_model =
         OpenAiModel::deepseek(BASE_URL, &api_key(), OpenAiArgs::deepseek("deepseek-v4-pro"));
 
-    let messages: Vec<OpenAIMessage> = vec![
-        OpenAIMessage::new("system", "You are a helpful assistant."),
-        OpenAIMessage::new("user", "Hi"),
+    let messages: Vec<Message> = vec![
+        Message::system("You are a helpful assistant."),
+        Message::user("Hi"),
     ];
 
     let output = deepseek_model
-        .chat(messages, None, None)
+        .chat(&messages, None, None)
         .await
         .expect("chat should succeed");
     let content = output.content.expect("chat reply should have content");
@@ -67,9 +67,9 @@ async fn test_deepseek_chat_stream() {
     let deepseek_model =
         OpenAiModel::deepseek(BASE_URL, &api_key(), OpenAiArgs::deepseek("deepseek-v4-pro"));
 
-    let messages: Vec<OpenAIMessage> = vec![OpenAIMessage::new("user", "Hi")];
+    let messages: Vec<Message> = vec![Message::user("Hi")];
     let mut stream = deepseek_model
-        .chat_stream(messages, None, None)
+        .chat_stream(&messages, None, None)
         .await
         .expect("chat_stream should connect");
 

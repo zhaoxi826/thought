@@ -34,7 +34,7 @@ src/model/
 ## 快速开始
 
 ```rust
-use model::{Model, OpenAiModel, OpenAiArgs, AnthropicModel, AnthropicArgs, OpenAIMessage, Message};
+use model::{Model, OpenAiModel, OpenAiArgs, AnthropicModel, AnthropicArgs, Message};
 
 # async fn demo() -> Result<(), model::Error> {
 // 原生 OpenAI
@@ -46,13 +46,18 @@ let ds = OpenAiModel::deepseek("", "sk-...", OpenAiArgs::deepseek("deepseek-v4-p
 // Anthropic
 let claude = AnthropicModel::new("", "sk-ant-...", AnthropicArgs::new("claude-opus-4-8"));
 
-// 统一入口：Model 枚举，收中立的 {role, content}
+// 统一入口：Model 枚举，收中立的 Message 切片（借用，不拷贝历史）
 let m = Model::OpenAi(ds);
-let messages = vec![
-    OpenAIMessage::new("system", "You are a helpful assistant."),
-    OpenAIMessage::new("user", "Hi"),
+let mut messages = vec![
+    Message::system("You are a helpful assistant."),
+    Message::user("Hi"),
 ];
-let output = m.chat(messages, None, None).await?;
+let output = m.chat(&messages, None, None).await?;
+// 工具回合：把输出原样放回历史，再按 id 回传工具结果
+messages.push(output.clone().into());
+for call in &output.tool_calls {
+    messages.push(Message::tool(&call.id, "tool result"));
+}
 println!("{:?}", output.content);
 # Ok(())
 # }
@@ -62,25 +67,36 @@ println!("{:?}", output.content);
 
 ### 顶层：`Model` 枚举
 
-协议无关的运行时封装，`chat` 以中立的 `{role, content}`（`OpenAIMessage`）收参，
-Anthropic 分支内部转成 content block。
+协议无关的运行时封装，`chat` / `chat_stream` 收 `&[Message]`，各协议借用翻译成
+自己的 wire 格式。`Clone` 廉价（`reqwest::Client` 与工具切片都是 `Arc`）。
 
 | 方法 | 说明 |
 | --- | --- |
 | `Model::OpenAi(OpenAiModel)` / `Model::Anthropic(AnthropicModel)` | 两个协议 arm |
-| `async chat(messages: Vec<OpenAIMessage>, user_id: Option<&str>, response_format: Option<&str>) -> Result<ChatOutput, Error>` | 非流式对话，返回结构化结果（文本 + 工具调用 + 结束原因 + 用量） |
-| `async chat_stream(...) -> Result<ChatStream, Error>` | 流式对话，返回逐帧增量的 chunk 流 |
-| `async get_models(&mut self) -> Result<(), Error>` | 拉取模型列表写入 `model_list` |
-| `set_tools(Vec<Function>)` | 覆盖可用工具列表，构造请求时各协议自行翻译成 wire 格式 |
+| `async chat(messages: &[Message], user_id: Option<&str>, response_format: Option<&str>) -> Result<ChatOutput, Error>` | 非流式对话，返回结构化结果（文本 + 工具调用 + 结束原因 + 用量） |
+| `async chat_stream(...) -> Result<ChatStream, Error>` | 流式对话，返回逐帧增量的 chunk 流（含累计用量） |
+| `async get_models(&mut self)` / `model_list()` | 拉取 / 读取模型列表 |
+| `set_tools(&[Function])` | 覆盖工具列表，立即翻译成 wire 格式缓存，之后每轮只借用 |
 
 ### 统一 trait：`ModelTrait`（`base::Model`）
 
-各客户端实现的泛型接口，用关联类型区分消息格式。
+各客户端实现的统一接口，全部收同一份中立 `&[Message]`。
 
-- `type Message: Message` —— OpenAI 侧为 `OpenAIMessage`，Anthropic 侧为 `AnthropicMessage`
-- `async chat(messages: Vec<Self::Message>, user_id, response_format) -> Result<ChatOutput, Error>`
-- `async chat_stream(messages: Vec<Self::Message>, user_id, response_format) -> Result<ChatStream, Error>`
+- `async chat(messages: &[Message], user_id, response_format) -> Result<ChatOutput, Error>`
+- `async chat_stream(messages: &[Message], user_id, response_format) -> Result<ChatStream, Error>`
 - `async get_models(&mut self) -> Result<(), Error>`
+
+### 消息：`Message`
+
+按角色 tag 的枚举，覆盖完整工具回合：
+
+- `System { content }` / `User { content }`
+- `Assistant { content: Option<String>, reasoning: Option<String>, tool_calls: Vec<ToolCall> }`
+  —— `From<ChatOutput>` 直接得到；DeepSeek 在工具回合要求回传 `reasoning`，OpenAI 侧只对
+  DeepSeek vendor 且带工具调用的消息回传
+- `Tool { call_id, content }` —— 工具结果。OpenAI 映射为 `tool` 角色；Anthropic 映射为 user
+  角色的 `tool_result` block，相邻同角色消息自动合并（并行工具结果同处一条消息），空文本
+  block 自动丢弃，非法 JSON 参数兜底为 `{}`
 
 ### 结构化输出与流式（`base`）
 
@@ -89,9 +105,12 @@ Anthropic 分支内部转成 content block。
   `finish_reason` 为协议原生字符串（OpenAI `stop` / `tool_calls`，Anthropic `end_turn` /
   `tool_use` / `max_tokens`）。
 - **`ChatStream`** = `BoxStream<'static, Result<ChatChunk, Error>>` —— 流式结果。
-  **`ChatChunk`** 的每个字段都是增量：`content` / `reasoning` 为文本碎片，
-  `tool_calls: Vec<ToolCallDelta>` 为工具调用碎片（`id` / `name` 只在首个片段出现，
-  `arguments` 需按 `index` 自行拼接），`finish_reason` 只在最后一帧出现。
+  **`ChatChunk`**：`content` / `reasoning` 为文本碎片，`tool_calls: Vec<ToolCallDelta>` 为工具
+  调用碎片（`id` / `name` 只在首个片段出现，`arguments` 按 `index` 拼接），`finish_reason`
+  只在结束帧出现，`usage: Option<Usage>` 为累计用量快照（OpenAI 自动带
+  `stream_options.include_usage`；Anthropic 来自 `message_start` / `message_delta`）。
+- **`StreamAccumulator`** / **`collect_stream(stream, on_chunk)`** —— 把 chunk 流拼回与非流式
+  同构的 `ChatOutput`；`on_chunk` 可边转发边累加。
 - **`ToolCall`** `{ id, name, arguments }` —— 一次完整工具调用，`arguments` 为原始 JSON 参数串。
 - **`Usage`** `{ prompt_tokens, completion_tokens, total_tokens }` —— Anthropic 的
   input/output 映射为 prompt/completion。
@@ -112,14 +131,14 @@ Anthropic 分支内部转成 content block。
 | 方法 | 适用 vendor |
 | --- | --- |
 | `OpenAiArgs::openai(model)` / `OpenAiArgs::deepseek(model)` | 构造 |
-| `.temperature(u8)` `.top_p(u8)` `.tools(Vec<Tool>)` | 通用 |
+| `.temperature(u8)` `.top_p(u8)` `.tools(&[Function])` / `set_tools` | 通用 |
 | `.tool_choice(ToolChoice)` `.penalties(freq, presence)` | 仅 OpenAI |
 | `.thinking(Thinking, ThinkingConfig)` | 仅 DeepSeek |
 
 > 注：setter 与当前 vendor 不匹配时是**空操作**（例如 OpenAI 预设调 `.thinking(...)` 会被忽略），不会报错。
 
 相关类型：`OpenAiVendor`、`Thinking` / `ThinkingType` / `ThinkingConfig`、`ToolChoice`、
-`Tool` / `Function` / `Parameter` / `ParameterType`、`ResponseFormat`、`ChatRequest` / `ChatResponse`。
+`OpenaiTool` / `Function` / `Parameter` / `ParameterType`、`ResponseFormat`、`ChatResponse`。
 常量：`OPENAI_BASE_URL`、`DEEPSEEK_BASE_URL`。
 
 ### Anthropic 协议
@@ -134,18 +153,14 @@ Anthropic 分支内部转成 content block。
 **`AnthropicArgs`**（builder 风格）
 
 - `AnthropicArgs::new(model)`
-- `.max_tokens(u32)` `.system(impl Into<String>)` `.temperature(u8)` `.top_p(u8)`
+- `.max_tokens(u32)` `.system(impl Into<String>)` `.temperature(u8)` `.top_p(u8)` `.tools(&[Function])`
 
 常量：`ANTHROPIC_BASE_URL`、`DEFAULT_VERSION`、`DEFAULT_MAX_TOKENS`。
 
 ### 跨协议公共件（`base`）
 
-- **`Error`** —— `Http(reqwest::Error)` / `EmptyResponse` / `Protocol(String)`（流式事件体等
-  无法按协议解析）；实现 `Display` / `std::error::Error` / `From<reqwest::Error>`。
-  响应无内容时返回 `EmptyResponse` 而非静默空串。
-- **`Message` trait** —— `role()` / `content()` / `new(role, content)`
-- **`OpenAIMessage`** `{ role, content }`、**`AnthropicMessage`** `{ role, content: Vec<block> }`
-  （含 `AnthropicContentBlock`）
+- **`Error`** —— `Http(reqwest::Error)` / `Api { status, body }`（非 2xx，保留厂商错误体）/
+  `EmptyResponse` / `Protocol(String)`（流式事件体等无法按协议解析）。
 - **`percent`** —— serde 辅助模块
 
 ## 关于 temperature / top_p 的 u8 表示
@@ -157,12 +172,8 @@ number 输出，**全程不经过 f32/f64**，既无浮点误差也无精度损�
 
 ## 现状与限制
 
-- **消息模型还是纯文本**：`OpenAIMessage` / `AnthropicMessage` 只有 `{role, content}`，
-  工具结果回传（`tool` 角色 / `tool_result` 块）与 assistant 的 `tool_calls` 回放进消息
-  尚未支持——工具调用目前只能通过 `ChatOutput::tool_calls` 拿到，多轮工具循环的消息
-  模型待补。
-- **流式不回传用量**：SSE chunk 里的 usage（OpenAI `stream_options`、Anthropic
-  `message_delta.usage`）暂未解析进 `ChatChunk`。
+- **Anthropic 的 thinking block 不回放**：目前不开启 Anthropic 扩展思考，assistant 的
+  `reasoning` 在 Anthropic 分支被忽略。
 - **Anthropic 无 `response_format`**：该参数在 Anthropic 分支被忽略（结构化输出走工具）。
 - **DeepSeek 的 Anthropic 兼容**尚未实现；届时在 `anthropic` 包内对称地加 `deepseek.rs`
   + 第二层 `AnthropicVendor` 即可，结构已预留。

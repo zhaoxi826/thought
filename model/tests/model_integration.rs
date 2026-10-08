@@ -1,4 +1,4 @@
-use model::{Message, Model, OpenAiArgs, OpenAiModel, OpenAIMessage};
+use model::{Message, Model, OpenAiArgs, OpenAiModel};
 use std::env;
 #[tokio::test]
 #[ignore = "needs network and API_KEY"]
@@ -7,10 +7,10 @@ async fn model_test() -> Result<(), Box<dyn std::error::Error>> {
     let ds =OpenAiModel::new("https://api.deepseek.com", &api_key, OpenAiArgs::deepseek("deepseek-v4-pro"));
     let deepseek = Model::OpenAi(ds);
     let messages = vec![
-        OpenAIMessage::new("system", "You are a helpful assistant."),
-        OpenAIMessage::new("user", "Hi"),
+        Message::system("You are a helpful assistant."),
+        Message::user("Hi"),
     ];
-    let reply = deepseek.chat(messages, None, None).await?;
+    let reply = deepseek.chat(&messages, None, None).await?;
     println!("{:?}", reply);
     Ok(())
 }

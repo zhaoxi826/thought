@@ -4,12 +4,13 @@
 //! 这是 OpenAI 一族的共享实现。DeepSeek 不是独立协议，只是第二层 [`OpenAiVendor`]
 //! 选到 `Deepseek` 变体、多带思考字段——其预设在同包的 [`super::deepseek`] 里。
 
-use crate::model::base::{self, percent, Error, Model, OpenAIMessage};
+use crate::model::base::{self, check_status, percent, Error, Message, Model};
 use crate::model::sse::{sse_events, SseEvent};
 use crate::model::tool::Function;
 use futures::StreamExt;
 use reqwest::Client;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use std::sync::Arc;
 
 pub const OPENAI_BASE_URL: &str = "https://api.openai.com";
 pub const DEEPSEEK_BASE_URL: &str = "https://api.deepseek.com";
@@ -18,43 +19,141 @@ pub const DEEPSEEK_BASE_URL: &str = "https://api.deepseek.com";
 
 /// 聊天完成请求体。
 ///
+/// 全部借用自 [`OpenAiArgs`] 与调用方的消息切片，构造请求不拷贝历史与工具定义。
 /// 公共字段直接列在这里；vendor 特有的那几个字段由第二层枚举 [`OpenAiVendor`]
 /// 承载，`#[serde(flatten)]` 展开到请求顶层。
 #[derive(Serialize, Debug)]
-pub struct ChatRequest {
-    /// 发送的消息列表。
-    pub messages: Vec<OpenAIMessage>,
+pub(crate) struct ChatRequest<'a> {
+    messages: Vec<WireMessage<'a>>,
 
-    /// 使用模型的 id。
-    pub model: String,
+    model: &'a str,
 
-    /// 响应格式配置。
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub response_format: Option<ResponseFormat>,
+    response_format: Option<ResponseFormat>,
 
-    /// 是否流式输出。暂时恒为 `false`。
-    pub stream: bool,
+    stream: bool,
 
-    /// 温度参数，内部用 0-200 的 u8 表示 0.0-2.0，序列化时自动除 100。
-    #[serde(with = "percent")]
-    pub temperature: u8,
-
-    /// top-p 采样参数，内部用 0-100 的 u8 表示 0.0-1.0，序列化时自动除 100。
-    #[serde(with = "percent")]
-    pub top_p: u8,
-
-    /// 工具列表（wire 类型）。
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub tools: Vec<OpenaiTool>,
-
-    /// 用户标识，按需使用。
+    /// 流式时请求在最后一帧附带用量。
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub user_id: Option<String>,
+    stream_options: Option<StreamOptions>,
 
-    /// 第二层：vendor 特有字段（OpenAI vs DeepSeek），展开到顶层。
+    #[serde(with = "percent")]
+    temperature: u8,
+
+    #[serde(with = "percent")]
+    top_p: u8,
+
+    #[serde(skip_serializing_if = "no_tools")]
+    tools: &'a [OpenaiTool],
+
+    /// 终端用户标识（OpenAI 的 `user` 字段）。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    user: Option<&'a str>,
+
     #[serde(flatten)]
-    pub vendor: OpenAiVendor,
+    vendor: &'a OpenAiVendor,
 }
+
+fn no_tools(tools: &&[OpenaiTool]) -> bool {
+    tools.is_empty()
+}
+
+#[derive(Serialize, Debug)]
+struct StreamOptions {
+    include_usage: bool,
+}
+
+/// 请求里的一条消息（wire 类型），借用中立 [`Message`] 的字段。
+#[derive(Serialize, Debug, PartialEq)]
+struct WireMessage<'a> {
+    role: &'static str,
+
+    /// assistant 只发起工具调用时为 `null`。
+    content: Option<&'a str>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reasoning_content: Option<&'a str>,
+
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    tool_calls: Vec<WireToolCall<'a>>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tool_call_id: Option<&'a str>,
+}
+
+#[derive(Serialize, Debug, PartialEq)]
+struct WireToolCall<'a> {
+    id: &'a str,
+    #[serde(rename = "type")]
+    kind: &'static str,
+    function: WireFunctionCall<'a>,
+}
+
+#[derive(Serialize, Debug, PartialEq)]
+struct WireFunctionCall<'a> {
+    name: &'a str,
+    arguments: &'a str,
+}
+
+/// 中立消息 → OpenAI wire 消息。
+///
+/// `echo_reasoning`：DeepSeek 思考模式要求工具回合内的 assistant 消息原样带回
+/// `reasoning_content`，因此只对“带工具调用的 assistant 消息”回传；纯文本回复的
+/// 推理内容不回传（DeepSeek 会忽略或拒绝），原生 OpenAI 一律不回传。
+fn wire_messages(messages: &[Message], echo_reasoning: bool) -> Vec<WireMessage<'_>> {
+    messages
+        .iter()
+        .map(|m| {
+            fn plain<'a>(role: &'static str, content: &'a str) -> WireMessage<'a> {
+                WireMessage {
+                    role,
+                    content: Some(content),
+                    reasoning_content: None,
+                    tool_calls: Vec::new(),
+                    tool_call_id: None,
+                }
+            }
+            match m {
+                Message::System { content } => plain("system", content),
+                Message::User { content } => plain("user", content),
+                Message::Assistant {
+                    content,
+                    reasoning,
+                    tool_calls,
+                } => WireMessage {
+                    role: "assistant",
+                    // 既无文本也无工具调用时仍需给出 content
+                    content: match (content.as_deref(), tool_calls.is_empty()) {
+                        (None, true) => Some(""),
+                        (c, _) => c,
+                    },
+                    reasoning_content: if echo_reasoning && !tool_calls.is_empty() {
+                        reasoning.as_deref()
+                    } else {
+                        None
+                    },
+                    tool_calls: tool_calls
+                        .iter()
+                        .map(|t| WireToolCall {
+                            id: &t.id,
+                            kind: "function",
+                            function: WireFunctionCall {
+                                name: &t.name,
+                                arguments: &t.arguments,
+                            },
+                        })
+                        .collect(),
+                    tool_call_id: None,
+                },
+                Message::Tool { call_id, content } => WireMessage {
+                    tool_call_id: Some(call_id),
+                    ..plain("tool", content)
+                },
+            }
+        })
+        .collect()
+}
+
 
 /// OpenAI 兼容家族的第二层枚举：同一协议下各 vendor 差异的那几个字段。
 ///
@@ -246,14 +345,14 @@ struct OpenaiFunctionDef {
     strict: bool,
 }
 
-impl From<Function> for OpenaiTool {
-    fn from(f: Function) -> Self {
+impl From<&Function> for OpenaiTool {
+    fn from(f: &Function) -> Self {
         Self {
             kind: "function",
             function: OpenaiFunctionDef {
                 parameters: f.schema_object(),
-                name: f.name,
-                description: f.description,
+                name: f.name.clone(),
+                description: f.description.clone(),
                 strict: f.strict,
             },
         }
@@ -380,7 +479,17 @@ pub struct CompletionTokensDetails {
 
 #[derive(Deserialize, Debug)]
 struct StreamResponse {
+    /// 开启 `include_usage` 时最后一帧的 choices 为空数组，只带 usage。
+    #[serde(default)]
     choices: Vec<StreamChoice>,
+    usage: Option<StreamUsage>,
+}
+
+#[derive(Deserialize, Debug)]
+struct StreamUsage {
+    prompt_tokens: u32,
+    completion_tokens: u32,
+    total_tokens: u32,
 }
 
 #[derive(Deserialize, Debug)]
@@ -409,8 +518,8 @@ struct StreamToolCallFunction {
     arguments: Option<String>,
 }
 
-/// 把一条 SSE 事件映射为中立 [`ChatChunk`]。`data: [DONE]` 与无增量
-/// 事件（如 usage-only chunk）返回 `None`。
+/// 把一条 SSE 事件映射为中立 [`ChatChunk`]。`data: [DONE]` 与既无 choice
+/// 又无 usage 的事件返回 `None`。
 fn map_stream_event(event: SseEvent) -> Option<Result<base::ChatChunk, Error>> {
     if event.data.trim() == "[DONE]" {
         return None;
@@ -424,7 +533,19 @@ fn map_stream_event(event: SseEvent) -> Option<Result<base::ChatChunk, Error>> {
             ))));
         }
     };
-    let choice = response.choices.into_iter().next()?;
+    let usage = response.usage.map(|u| base::Usage {
+        prompt_tokens: u.prompt_tokens,
+        completion_tokens: u.completion_tokens,
+        total_tokens: u.total_tokens,
+    });
+    let Some(choice) = response.choices.into_iter().next() else {
+        return usage.map(|usage| {
+            Ok(base::ChatChunk {
+                usage: Some(usage),
+                ..Default::default()
+            })
+        });
+    };
     let tool_calls = choice
         .delta
         .tool_calls
@@ -448,12 +569,17 @@ fn map_stream_event(event: SseEvent) -> Option<Result<base::ChatChunk, Error>> {
         reasoning: choice.delta.reasoning_content,
         tool_calls,
         finish_reason: choice.finish_reason,
+        usage,
     }))
 }
 
 // 客户端
 
 /// OpenAI Chat Completions 客户端（DeepSeek 亦复用之）。
+///
+/// `Clone` 很廉价：`reqwest::Client` 内部是 `Arc`，工具定义也是共享切片，
+/// 适合给多个 agent 各持一份再分别换工具。
+#[derive(Clone)]
 pub struct OpenAiModel {
     base_url: String,
     api_key: String,
@@ -491,34 +617,30 @@ impl OpenAiModel {
     /// 构造请求（`stream` 由调用方决定）并发送，返回原始响应。
     async fn send_chat(
         &self,
-        messages: Vec<OpenAIMessage>,
+        messages: &[Message],
         user_id: Option<&str>,
         response_format: Option<&str>,
         stream: bool,
     ) -> Result<reqwest::Response, Error> {
-        let mut request = self.args.build_request(messages);
-        request.user_id = user_id.map(|s| s.to_owned());
-        request.response_format = response_format.map(ResponseFormat::parse);
-        request.stream = stream;
+        let request = self
+            .args
+            .build_request(messages, user_id, response_format.map(ResponseFormat::parse), stream);
 
-        Ok(self
+        let response = self
             .client
             .post(format!("{}/chat/completions", self.base_url))
             .bearer_auth(&self.api_key)
-            .header("Content-Type", "application/json")
             .json(&request)
             .send()
-            .await?
-            .error_for_status()?)
+            .await?;
+        check_status(response).await
     }
 }
 
 impl Model for OpenAiModel {
-    type Message = OpenAIMessage;
-
     async fn chat(
         &self,
-        messages: Vec<OpenAIMessage>,
+        messages: &[Message],
         user_id: Option<&str>,
         response_format: Option<&str>,
     ) -> Result<base::ChatOutput, Error> {
@@ -554,7 +676,7 @@ impl Model for OpenAiModel {
 
     async fn chat_stream(
         &self,
-        messages: Vec<OpenAIMessage>,
+        messages: &[Message],
         user_id: Option<&str>,
         response_format: Option<&str>,
     ) -> Result<base::ChatStream, Error> {
@@ -572,14 +694,15 @@ impl Model for OpenAiModel {
     }
 
     async fn get_models(&mut self) -> Result<(), Error> {
-        self.model_list = self
+        let response = self
             .client
             .get(format!("{}/models", self.base_url))
             .header("Accept", "application/json")
             .bearer_auth(&self.api_key)
             .send()
+            .await?;
+        self.model_list = check_status(response)
             .await?
-            .error_for_status()?
             .json::<ModelsResponse>()
             .await?
             .data
@@ -608,8 +731,8 @@ pub struct OpenAiArgs {
     /// top-p 采样参数，内部用 0-100 的 u8 表示 0.0-1.0，序列化时自动除 100。
     pub top_p: u8,
 
-    /// 工具列表（协议中立的 [`Function`]，构造请求时转成 wire 类型）。
-    pub tools: Vec<Function>,
+    /// 工具列表，设置时一次性翻译成 wire 类型并共享，之后每轮请求只借用。
+    pub(super) tools: Arc<[OpenaiTool]>,
 
     /// 第二层 vendor 及其特有字段。
     pub vendor: OpenAiVendor,
@@ -622,7 +745,7 @@ impl OpenAiArgs {
             model: model.into(),
             temperature: 100,
             top_p: 100,
-            tools: Vec::new(),
+            tools: Arc::new([]),
             vendor: OpenAiVendor::OpenAi {
                 frequency_penalty: None,
                 presence_penalty: None,
@@ -641,9 +764,14 @@ impl OpenAiArgs {
         self
     }
 
-    pub fn tools(mut self, tools: Vec<Function>) -> Self {
-        self.tools = tools;
+    pub fn tools(mut self, tools: &[Function]) -> Self {
+        self.set_tools(tools);
         self
+    }
+
+    /// 覆盖工具列表（翻译成 wire 类型后缓存）。
+    pub fn set_tools(&mut self, tools: &[Function]) {
+        self.tools = tools.iter().map(OpenaiTool::from).collect();
     }
 
     /// 设置 OpenAI 工具选择策略；vendor 非 OpenAI 时为空操作。
@@ -668,21 +796,28 @@ impl OpenAiArgs {
         self
     }
 
-    /// 用预存参数与传入消息构造请求体。
-    ///
-    /// `response_format` / `user_id` 由客户端在调用时补充，这里置空；
-    /// `stream` 暂时恒为 `false`（流式尚未实现）。
-    pub(super) fn build_request(&self, messages: Vec<OpenAIMessage>) -> ChatRequest {
+    /// 用预存参数与传入消息构造请求体（全程借用）。
+    pub(crate) fn build_request<'a>(
+        &'a self,
+        messages: &'a [Message],
+        user: Option<&'a str>,
+        response_format: Option<ResponseFormat>,
+        stream: bool,
+    ) -> ChatRequest<'a> {
+        let echo_reasoning = matches!(self.vendor, OpenAiVendor::Deepseek { .. });
         ChatRequest {
-            messages,
-            model: self.model.clone(),
-            response_format: None,
-            stream: false,
+            messages: wire_messages(messages, echo_reasoning),
+            model: &self.model,
+            response_format,
+            stream,
+            stream_options: stream.then_some(StreamOptions {
+                include_usage: true,
+            }),
             temperature: self.temperature,
             top_p: self.top_p,
-            tools: self.tools.iter().cloned().map(OpenaiTool::from).collect(),
-            user_id: None,
-            vendor: self.vendor.clone(),
+            tools: &self.tools,
+            user,
+            vendor: &self.vendor,
         }
     }
 }
@@ -775,30 +910,94 @@ mod tests {
 
     // ---- 请求序列化（build_request 全链路） ----
 
+    fn request_json(args: &OpenAiArgs, messages: &[Message], stream: bool) -> serde_json::Value {
+        serde_json::to_value(args.build_request(messages, None, None, stream)).unwrap()
+    }
+
     #[test]
     fn request_serializes_percent_fields_as_decimals() {
         let args = OpenAiArgs::openai("gpt-5").temperature(70).top_p(95);
-        let request = args.build_request(vec![]);
-        let json = serde_json::to_value(&request).unwrap();
+        let json = request_json(&args, &[], false);
         assert_eq!(json["temperature"], serde_json::json!(0.7));
         assert_eq!(json["top_p"], serde_json::json!(0.95));
         assert_eq!(json["stream"], serde_json::json!(false));
+        assert!(json.get("stream_options").is_none());
+        assert!(json.get("tools").is_none());
+    }
+
+    #[test]
+    fn streaming_request_asks_for_usage() {
+        let json = request_json(&OpenAiArgs::openai("gpt-5"), &[], true);
+        assert_eq!(json["stream"], serde_json::json!(true));
+        assert_eq!(json["stream_options"], serde_json::json!({"include_usage": true}));
+    }
+
+    #[test]
+    fn request_carries_tools_once_translated() {
+        let args = OpenAiArgs::openai("gpt-5").tools(&[Function {
+            name: "read_file".into(),
+            description: "read".into(),
+            parameters: vec![],
+            strict: false,
+        }]);
+        let json = request_json(&args, &[], false);
+        assert_eq!(json["tools"][0]["type"], "function");
+        assert_eq!(json["tools"][0]["function"]["name"], "read_file");
+        // clone 共享同一份工具切片
+        assert!(Arc::ptr_eq(&args.tools, &args.clone().tools));
+    }
+
+    #[test]
+    fn request_maps_tool_round_messages() {
+        let messages = [
+            Message::system("sys"),
+            Message::user("hi"),
+            Message::Assistant {
+                content: None,
+                reasoning: Some("think".into()),
+                tool_calls: vec![base::ToolCall {
+                    id: "call_1".into(),
+                    name: "read_file".into(),
+                    arguments: "{\"file_path\":\"a\"}".into(),
+                }],
+            },
+            Message::tool("call_1", "file body"),
+            Message::Assistant {
+                content: Some("done".into()),
+                reasoning: Some("final think".into()),
+                tool_calls: vec![],
+            },
+        ];
+        let json = request_json(&OpenAiArgs::openai("gpt-5"), &messages, false);
+        assert_eq!(
+            json["messages"],
+            serde_json::json!([
+                {"role": "system", "content": "sys"},
+                {"role": "user", "content": "hi"},
+                {"role": "assistant", "content": null, "tool_calls": [
+                    {"id": "call_1", "type": "function",
+                     "function": {"name": "read_file", "arguments": "{\"file_path\":\"a\"}"}}
+                ]},
+                {"role": "tool", "content": "file body", "tool_call_id": "call_1"},
+                {"role": "assistant", "content": "done"},
+            ])
+        );
+
+        // DeepSeek 只在工具回合回传 reasoning_content
+        let json = request_json(&OpenAiArgs::deepseek("deepseek-v4-pro"), &messages, false);
+        assert_eq!(json["messages"][2]["reasoning_content"], "think");
+        assert!(json["messages"][4].get("reasoning_content").is_none());
     }
 
     #[test]
     fn request_flattens_vendor_fields_without_cross_contamination() {
-        let openai = serde_json::to_value(
-            OpenAiArgs::openai("gpt-5")
-                .penalties(Some(0.5), None)
-                .build_request(vec![]),
-        )
-        .unwrap();
+        let openai = request_json(&OpenAiArgs::openai("gpt-5").penalties(Some(0.5), None), &[], false);
         assert_eq!(openai["frequency_penalty"], serde_json::json!(0.5));
         assert!(openai.get("presence_penalty").is_none());
         assert!(openai.get("thinking").is_none());
         assert!(openai.get("reasoning_effort").is_none());
 
-        let deepseek = serde_json::to_value(OpenAiArgs::deepseek("deepseek-v4-pro").build_request(vec![])).unwrap();
+        let deepseek = request_json(&OpenAiArgs::deepseek("deepseek-v4-pro"), &[], false);
         assert_eq!(deepseek["thinking"], serde_json::json!({"type": "enabled"}));
         assert_eq!(deepseek["reasoning_effort"], serde_json::json!("high"));
         assert!(deepseek.get("frequency_penalty").is_none());
@@ -837,6 +1036,20 @@ mod tests {
         assert_eq!(delta.id.as_deref(), Some("call_1"));
         assert_eq!(delta.name.as_deref(), Some("read_file"));
         assert_eq!(delta.arguments.as_deref(), Some("{\"file"));
+    }
+
+    #[test]
+    fn map_stream_event_maps_usage_only_chunk() {
+        let event = SseEvent {
+            event: None,
+            data: "{\"choices\":[],\"usage\":{\"prompt_tokens\":3,\"completion_tokens\":4,\"total_tokens\":7}}".into(),
+        };
+        let chunk = map_stream_event(event).unwrap().unwrap();
+        assert_eq!(chunk.usage, Some(base::Usage::new(3, 4)));
+        assert_eq!(chunk.content, None);
+
+        let empty = SseEvent { event: None, data: "{\"choices\":[]}".into() };
+        assert!(map_stream_event(empty).is_none());
     }
 
     #[test]

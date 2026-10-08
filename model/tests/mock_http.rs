@@ -6,12 +6,12 @@ mod common;
 use common::{serve_once, MockResponse};
 use futures::StreamExt;
 use model::{
-    AnthropicArgs, AnthropicModel, ChatChunk, Message, ModelTrait, OpenAIMessage, OpenAiArgs,
-    OpenAiModel,
+    collect_stream, AnthropicArgs, AnthropicModel, ChatChunk, Message, ModelTrait, OpenAiArgs,
+    OpenAiModel, ToolCall, Usage,
 };
 
-fn messages() -> Vec<OpenAIMessage> {
-    vec![OpenAIMessage::new("user", "hi")]
+fn messages() -> Vec<Message> {
+    vec![Message::user("hi")]
 }
 
 // ---- OpenAI 协议 ----
@@ -33,7 +33,7 @@ async fn openai_chat_returns_structured_output() {
     let (url, request_rx) = serve_once(MockResponse::json(OPENAI_CHAT_BODY)).await;
     let model = OpenAiModel::new(&url, "sk-test", OpenAiArgs::openai("gpt-5"));
 
-    let output = model.chat(messages(), None, None).await.unwrap();
+    let output = model.chat(&messages(), None, None).await.unwrap();
 
     assert_eq!(output.content, None);
     assert_eq!(output.finish_reason, "tool_calls");
@@ -57,6 +57,7 @@ const OPENAI_STREAM_BODY: &str = concat!(
     "data: {\"choices\":[{\"delta\":{\"content\":null,\"reasoning_content\":null,\"tool_calls\":[{\"index\":0,\"id\":\"call_1\",\"function\":{\"name\":\"read_file\",\"arguments\":\"\"}}]},\"finish_reason\":null}]}\n\n",
     "data: {\"choices\":[{\"delta\":{\"content\":null,\"reasoning_content\":null,\"tool_calls\":[{\"index\":0,\"id\":null,\"function\":{\"name\":null,\"arguments\":\"{\\\"file\\\"}\"}}]},\"finish_reason\":null}]}\n\n",
     "data: {\"choices\":[{\"delta\":{\"content\":null,\"reasoning_content\":null,\"tool_calls\":null},\"finish_reason\":\"tool_calls\"}]}\n\n",
+    "data: {\"choices\":[],\"usage\":{\"prompt_tokens\":11,\"completion_tokens\":7,\"total_tokens\":18}}\n\n",
     "data: [DONE]\n\n",
 );
 
@@ -65,13 +66,13 @@ async fn openai_chat_stream_yields_chunks_in_order() {
     let (url, request_rx) = serve_once(MockResponse::sse(OPENAI_STREAM_BODY)).await;
     let model = OpenAiModel::new(&url, "sk-test", OpenAiArgs::openai("gpt-5"));
 
-    let mut stream = model.chat_stream(messages(), None, None).await.unwrap();
+    let mut stream = model.chat_stream(&messages(), None, None).await.unwrap();
     let mut chunks: Vec<ChatChunk> = Vec::new();
     while let Some(chunk) = stream.next().await {
         chunks.push(chunk.unwrap());
     }
 
-    assert_eq!(chunks.len(), 5);
+    assert_eq!(chunks.len(), 6);
     assert_eq!(chunks[0].content.as_deref(), Some("he"));
     assert_eq!(chunks[1].content.as_deref(), Some("llo"));
 
@@ -83,9 +84,11 @@ async fn openai_chat_stream_yields_chunks_in_order() {
     assert_eq!(delta.arguments.as_deref(), Some("{\"file\"}"));
 
     assert_eq!(chunks[4].finish_reason.as_deref(), Some("tool_calls"));
+    assert_eq!(chunks[5].usage, Some(Usage::new(11, 7)));
 
     let request = request_rx.await.unwrap();
     assert!(request.contains("\"stream\":true"), "body: {request}");
+    assert!(request.contains("\"include_usage\":true"), "body: {request}");
 }
 
 // ---- Anthropic 协议 ----
@@ -106,11 +109,7 @@ async fn anthropic_chat_returns_structured_output() {
     let model = AnthropicModel::new(&url, "sk-ant-test", AnthropicArgs::new("claude"));
 
     let output = model
-        .chat(
-            vec![model::AnthropicMessage::new("user", "hi")],
-            None,
-            None,
-        )
+        .chat(&messages(), None, None)
         .await
         .unwrap();
 
@@ -158,7 +157,7 @@ async fn anthropic_chat_stream_yields_chunks_in_order() {
     let model = AnthropicModel::new(&url, "sk-ant-test", AnthropicArgs::new("claude"));
 
     let mut stream = model
-        .chat_stream(vec![model::AnthropicMessage::new("user", "hi")], None, None)
+        .chat_stream(&messages(), None, None)
         .await
         .unwrap();
     let mut chunks: Vec<ChatChunk> = Vec::new();
@@ -166,7 +165,9 @@ async fn anthropic_chat_stream_yields_chunks_in_order() {
         chunks.push(chunk.unwrap());
     }
 
-    assert_eq!(chunks.len(), 5);
+    assert_eq!(chunks.len(), 6);
+    assert_eq!(chunks[0].usage, Some(Usage::new(11, 1)));
+    let chunks = &chunks[1..];
     assert_eq!(chunks[0].content.as_deref(), Some("he"));
     assert_eq!(chunks[1].content.as_deref(), Some("llo"));
 
@@ -180,7 +181,56 @@ async fn anthropic_chat_stream_yields_chunks_in_order() {
     assert_eq!(delta.arguments.as_deref(), Some("{\"file\"}"));
 
     assert_eq!(chunks[4].finish_reason.as_deref(), Some("tool_use"));
+    assert_eq!(chunks[4].usage, Some(Usage::new(0, 7)));
 
     let request = request_rx.await.unwrap();
     assert!(request.contains("\"stream\":true"), "body: {request}");
+}
+
+// ---- 流式累加：两个协议的流拼回与非流式同构的 ChatOutput ----
+
+#[tokio::test]
+async fn collect_stream_assembles_output_for_both_protocols() {
+    let expected_call = ToolCall {
+        id: String::new(),
+        name: "read_file".into(),
+        arguments: "{\"file\"}".into(),
+    };
+
+    let (url, _rx) = serve_once(MockResponse::sse(OPENAI_STREAM_BODY)).await;
+    let openai = OpenAiModel::new(&url, "sk-test", OpenAiArgs::openai("gpt-5"));
+    let mut seen = 0;
+    let out = collect_stream(openai.chat_stream(&messages(), None, None).await.unwrap(), |_| seen += 1)
+        .await
+        .unwrap();
+    assert_eq!(seen, 6);
+    assert_eq!(out.content.as_deref(), Some("hello"));
+    assert_eq!(out.finish_reason, "tool_calls");
+    assert_eq!(out.usage, Usage::new(11, 7));
+    assert_eq!(out.tool_calls, vec![ToolCall { id: "call_1".into(), ..expected_call.clone() }]);
+
+    let (url, _rx) = serve_once(MockResponse::sse(ANTHROPIC_STREAM_BODY)).await;
+    let anthropic = AnthropicModel::new(&url, "sk-ant-test", AnthropicArgs::new("claude"));
+    let out = collect_stream(anthropic.chat_stream(&messages(), None, None).await.unwrap(), |_| {})
+        .await
+        .unwrap();
+    assert_eq!(out.content.as_deref(), Some("hello"));
+    assert_eq!(out.finish_reason, "tool_use");
+    assert_eq!(out.usage, Usage::new(11, 7));
+    assert_eq!(out.tool_calls, vec![ToolCall { id: "toolu_1".into(), ..expected_call }]);
+}
+
+// ---- 错误状态保留响应体 ----
+
+#[tokio::test]
+async fn api_error_keeps_status_and_body() {
+    let (url, _rx) = serve_once(MockResponse::error(400, r#"{"error":{"message":"bad"}}"#)).await;
+    let model = OpenAiModel::new(&url, "sk-test", OpenAiArgs::openai("gpt-5"));
+    match model.chat(&messages(), None, None).await {
+        Err(model::Error::Api { status, body }) => {
+            assert_eq!(status, 400);
+            assert!(body.contains("bad"), "body: {body}");
+        }
+        other => panic!("expected api error, got {other:?}"),
+    }
 }

@@ -1,4 +1,4 @@
-use model::{AnthropicArgs, AnthropicMessage, AnthropicModel, Message, ModelTrait};
+use model::{AnthropicArgs, AnthropicModel, Message, ModelTrait};
 use std::env;
 
 const BASE_URL: &str = "https://api.deepseek.com/anthropic";
@@ -26,13 +26,13 @@ async fn test_anthropic_chat() {
         AnthropicArgs::new("deepseek-v4-pro"),
     );
 
-    let messages: Vec<AnthropicMessage> = vec![
-        AnthropicMessage::new("system", "You are a helpful assistant."),
-        AnthropicMessage::new("user", "Hi"),
+    let messages: Vec<Message> = vec![
+        Message::system("You are a helpful assistant."),
+        Message::user("Hi"),
     ];
 
     let output = anthropic_model
-        .chat(messages, None, None)
+        .chat(&messages, None, None)
         .await
         .expect("chat should succeed");
     let content = output.content.expect("chat reply should have content");

@@ -5,18 +5,22 @@
 //! 因此不复用 OpenAI 协议的客户端，自带一套线协议，但实现同一个 [`Model`] trait
 //! （`type Message = AnthropicMessage`）。
 
-use crate::model::base::{self, percent, AnthropicMessage, Error, Message, Model};
+use crate::model::base::{self, check_status, percent, Error, Message, Model};
 use crate::model::sse::{sse_events, SseEvent};
 use crate::model::tool::Function;
 use futures::StreamExt;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
+use serde_json::value::RawValue;
+use std::borrow::Cow;
+use std::sync::Arc;
 
 pub const ANTHROPIC_BASE_URL: &str = "https://api.anthropic.com";
 pub const DEFAULT_VERSION: &str = "2023-06-01";
 pub const DEFAULT_MAX_TOKENS: u32 = 1024;
 
-/// Anthropic 模型客户端。
+/// Anthropic 模型客户端。`Clone` 廉价（见 `OpenAiModel`）。
+#[derive(Clone)]
 pub struct AnthropicModel {
     base_url: String,
     api_key: String,
@@ -52,72 +56,57 @@ impl AnthropicModel {
 }
 
 impl AnthropicModel {
-    /// 构造 `/v1/messages` 请求体。
+    /// 构造 `/v1/messages` 请求体（借用消息切片）。
     ///
-    /// role == "system" 的消息提取合并进顶层 system 字段（拼在 `args.system` 之后），
-    /// 其余消息原样保留；`stream` 由调用方决定。
-    fn build_request(
-        &self,
-        messages: Vec<AnthropicMessage>,
-        user_id: Option<&str>,
+    /// [`Message::System`] 提取合并进顶层 system 字段（拼在 `args.system` 之后），
+    /// 其余消息翻译成 content block，见 [`wire_messages`]。
+    fn build_request<'a>(
+        &'a self,
+        messages: &'a [Message],
+        user_id: Option<&'a str>,
         stream: bool,
-    ) -> MessagesRequest<'_> {
-        let mut system = self.args.system.clone();
-        let mut chat_messages = Vec::with_capacity(messages.len());
+    ) -> MessagesRequest<'a> {
+        let mut system: Option<Cow<'a, str>> = self.args.system.as_deref().map(Cow::Borrowed);
         for m in messages {
-            if m.role() == "system" {
-                let text = m.content().to_owned();
+            if let Message::System { content } = m {
                 system = Some(match system {
-                    Some(prev) if !prev.is_empty() => format!("{prev}\n{text}"),
-                    _ => text,
+                    Some(prev) if !prev.is_empty() => Cow::Owned(format!("{prev}\n{content}")),
+                    _ => Cow::Borrowed(content),
                 });
-            } else {
-                chat_messages.push(m);
             }
         }
 
         MessagesRequest {
             model: &self.args.model,
             max_tokens: self.args.max_tokens,
-            messages: chat_messages,
+            messages: wire_messages(messages),
             system,
             temperature: self.args.temperature,
             top_p: self.args.top_p,
             stream,
-            tools: self
-                .args
-                .tools
-                .iter()
-                .cloned()
-                .map(AnthropicTool::from)
-                .collect(),
-            metadata: user_id.map(|id| Metadata {
-                user_id: id.to_owned(),
-            }),
+            tools: &self.args.tools,
+            metadata: user_id.map(|user_id| Metadata { user_id }),
         }
     }
 
     /// 发送请求并返回原始响应。
     async fn send(&self, request: &MessagesRequest<'_>) -> Result<reqwest::Response, Error> {
-        Ok(self
+        let response = self
             .client
             .post(format!("{}/v1/messages", self.base_url))
             .header("x-api-key", &self.api_key)
             .header("anthropic-version", &self.version)
-            .header("Content-Type", "application/json")
             .json(request)
             .send()
-            .await?
-            .error_for_status()?)
+            .await?;
+        check_status(response).await
     }
 }
 
 impl Model for AnthropicModel {
-    type Message = AnthropicMessage;
-
     async fn chat(
         &self,
-        messages: Vec<AnthropicMessage>,
+        messages: &[Message],
         user_id: Option<&str>,
         // Anthropic 没有 OpenAI 式的 response_format，结构化输出走工具，此处忽略。
         _response_format: Option<&str>,
@@ -153,17 +142,13 @@ impl Model for AnthropicModel {
             reasoning: None,
             tool_calls,
             finish_reason: response.stop_reason.unwrap_or_default(),
-            usage: base::Usage {
-                prompt_tokens: response.usage.input_tokens,
-                completion_tokens: response.usage.output_tokens,
-                total_tokens: response.usage.input_tokens + response.usage.output_tokens,
-            },
+            usage: response.usage.into(),
         })
     }
 
     async fn chat_stream(
         &self,
-        messages: Vec<AnthropicMessage>,
+        messages: &[Message],
         user_id: Option<&str>,
         _response_format: Option<&str>,
     ) -> Result<base::ChatStream, Error> {
@@ -180,15 +165,16 @@ impl Model for AnthropicModel {
     }
 
     async fn get_models(&mut self) -> Result<(), Error> {
-        self.model_list = self
+        let response = self
             .client
             .get(format!("{}/v1/models", self.base_url))
             .header("x-api-key", &self.api_key)
             .header("anthropic-version", &self.version)
             .header("Accept", "application/json")
             .send()
+            .await?;
+        self.model_list = check_status(response)
             .await?
-            .error_for_status()?
             .json::<ModelsResponse>()
             .await?
             .data
@@ -211,12 +197,12 @@ pub struct AnthropicTool {
     input_schema: serde_json::Value,
 }
 
-impl From<Function> for AnthropicTool {
-    fn from(f: Function) -> Self {
+impl From<&Function> for AnthropicTool {
+    fn from(f: &Function) -> Self {
         Self {
             input_schema: f.schema_object(),
-            name: f.name,
-            description: f.description,
+            name: f.name.clone(),
+            description: f.description.clone(),
         }
     }
 }
@@ -239,8 +225,8 @@ pub struct AnthropicArgs {
     /// top-p 采样参数，内部用 0-100 的 u8 表示 0.0-1.0，序列化时自动除 100。
     pub top_p: u8,
 
-    /// 工具列表（协议中立的 [`Function`]，构造请求时转成 wire 类型）。
-    pub tools: Vec<Function>,
+    /// 工具列表，设置时一次性翻译成 wire 类型并共享，之后每轮请求只借用。
+    tools: Arc<[AnthropicTool]>,
 }
 
 impl Default for AnthropicArgs {
@@ -251,7 +237,7 @@ impl Default for AnthropicArgs {
             system: None,
             temperature: 100,
             top_p: 100,
-            tools: Vec::new(),
+            tools: Arc::new([]),
         }
     }
 }
@@ -284,9 +270,14 @@ impl AnthropicArgs {
         self
     }
 
-    pub fn tools(mut self, tools: Vec<Function>) -> Self {
-        self.tools = tools;
+    pub fn tools(mut self, tools: &[Function]) -> Self {
+        self.set_tools(tools);
         self
+    }
+
+    /// 覆盖工具列表（翻译成 wire 类型后缓存）。
+    pub fn set_tools(&mut self, tools: &[Function]) {
+        self.tools = tools.iter().map(AnthropicTool::from).collect();
     }
 }
 
@@ -296,10 +287,10 @@ impl AnthropicArgs {
 struct MessagesRequest<'a> {
     model: &'a str,
     max_tokens: u32,
-    messages: Vec<AnthropicMessage>,
+    messages: Vec<WireMessage<'a>>,
 
     #[serde(skip_serializing_if = "Option::is_none")]
-    system: Option<String>,
+    system: Option<Cow<'a, str>>,
 
     #[serde(with = "percent")]
     temperature: u8,
@@ -311,16 +302,103 @@ struct MessagesRequest<'a> {
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     stream: bool,
 
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    tools: Vec<AnthropicTool>,
+    #[serde(skip_serializing_if = "no_tools")]
+    tools: &'a [AnthropicTool],
 
     #[serde(skip_serializing_if = "Option::is_none")]
-    metadata: Option<Metadata>,
+    metadata: Option<Metadata<'a>>,
+}
+
+fn no_tools(tools: &&[AnthropicTool]) -> bool {
+    tools.is_empty()
 }
 
 #[derive(Serialize, Debug)]
-struct Metadata {
-    user_id: String,
+struct Metadata<'a> {
+    user_id: &'a str,
+}
+
+/// 请求里的一条消息（wire 类型）。Anthropic 只有 user / assistant 两种角色。
+#[derive(Serialize, Debug)]
+struct WireMessage<'a> {
+    role: &'static str,
+    content: Vec<WireBlock<'a>>,
+}
+
+#[derive(Serialize, Debug)]
+#[serde(tag = "type", rename_all = "snake_case")]
+enum WireBlock<'a> {
+    Text {
+        text: &'a str,
+    },
+    ToolUse {
+        id: &'a str,
+        name: &'a str,
+        /// 参数 JSON 对象，原样借用模型给出的参数串。
+        input: &'a RawValue,
+    },
+    ToolResult {
+        tool_use_id: &'a str,
+        content: &'a str,
+    },
+}
+
+/// 模型给出的参数串不是合法 JSON 时的兜底输入。
+fn empty_input() -> &'static RawValue {
+    static EMPTY: std::sync::OnceLock<Box<RawValue>> = std::sync::OnceLock::new();
+    EMPTY.get_or_init(|| RawValue::from_string("{}".to_owned()).expect("valid json"))
+}
+
+/// 中立消息 → Anthropic wire 消息。
+///
+/// - System 已被 [`AnthropicModel::build_request`] 提到顶层，这里跳过；
+/// - assistant 的文本与工具调用变成 `text` + `tool_use` block；
+/// - [`Message::Tool`] 变成 user 角色的 `tool_result` block；
+/// - 相邻同角色消息合并成一条（并行工具调用的多个结果必须同处一条 user 消息）；
+/// - 空文本不产出 block（Anthropic 拒绝空 text block）。
+fn wire_messages(messages: &[Message]) -> Vec<WireMessage<'_>> {
+    let mut out: Vec<WireMessage<'_>> = Vec::with_capacity(messages.len());
+    for m in messages {
+        let (role, blocks): (&'static str, Vec<WireBlock<'_>>) = match m {
+            Message::System { .. } => continue,
+            Message::User { content } => ("user", text_block(content).into_iter().collect()),
+            Message::Assistant {
+                content,
+                tool_calls,
+                ..
+            } => {
+                let mut blocks: Vec<_> = content.as_deref().and_then(text_block).into_iter().collect();
+                blocks.extend(tool_calls.iter().map(|t| WireBlock::ToolUse {
+                    id: &t.id,
+                    name: &t.name,
+                    input: serde_json::from_str(&t.arguments).unwrap_or_else(|_| empty_input()),
+                }));
+                ("assistant", blocks)
+            }
+            Message::Tool { call_id, content } => (
+                "user",
+                vec![WireBlock::ToolResult {
+                    tool_use_id: call_id,
+                    content,
+                }],
+            ),
+        };
+        if blocks.is_empty() {
+            continue;
+        }
+        match out.last_mut() {
+            Some(last) if last.role == role => last.content.extend(blocks),
+            _ => out.push(WireMessage {
+                role,
+                content: blocks,
+            }),
+        }
+    }
+    out
+}
+
+fn text_block(text: &str) -> Option<WireBlock<'_>> {
+    (!text.is_empty()).then_some(WireBlock::Text { text })
 }
 
 // `/v1/messages` 响应结构
@@ -399,11 +477,22 @@ enum ContentBlockDeltaBody {
 #[derive(Deserialize, Debug)]
 struct MessageDelta {
     delta: MessageDeltaBody,
+    usage: Option<Usage>,
 }
 
 #[derive(Deserialize, Debug)]
 struct MessageDeltaBody {
     stop_reason: Option<String>,
+}
+
+#[derive(Deserialize, Debug)]
+struct MessageStart {
+    message: MessageStartBody,
+}
+
+#[derive(Deserialize, Debug)]
+struct MessageStartBody {
+    usage: Option<Usage>,
 }
 
 /// 解析流式事件体；失败包成 [`Error::Protocol`]。
@@ -456,25 +545,46 @@ fn map_stream_event(event: SseEvent) -> Option<Result<base::ChatChunk, Error>> {
             }
             Err(e) => Some(Err(e)),
         },
-        Some("message_delta") => match parse_event::<MessageDelta>(&event.data) {
-            Ok(MessageDelta { delta }) => delta.stop_reason.map(|reason| {
+        Some("message_start") => match parse_event::<MessageStart>(&event.data) {
+            Ok(MessageStart { message }) => message.usage.map(|usage| {
                 Ok(base::ChatChunk {
-                    finish_reason: Some(reason),
+                    usage: Some(usage.into()),
                     ..Default::default()
                 })
             }),
             Err(e) => Some(Err(e)),
         },
-        // message_start / content_block_stop / message_stop / ping / 未知事件
+        Some("message_delta") => match parse_event::<MessageDelta>(&event.data) {
+            Ok(MessageDelta { delta, usage }) => {
+                if delta.stop_reason.is_none() && usage.is_none() {
+                    return None;
+                }
+                Some(Ok(base::ChatChunk {
+                    finish_reason: delta.stop_reason,
+                    usage: usage.map(Into::into),
+                    ..Default::default()
+                }))
+            }
+            Err(e) => Some(Err(e)),
+        },
+        // content_block_stop / message_stop / ping / 未知事件
         _ => None,
     }
 }
 
-#[allow(dead_code)]
-#[derive(Deserialize, Debug)]
+/// Anthropic 用量。流式事件里两个字段都可能缺省（`message_delta` 通常只带 output）。
+#[derive(Deserialize, Debug, Default)]
 struct Usage {
+    #[serde(default)]
     input_tokens: u32,
+    #[serde(default)]
     output_tokens: u32,
+}
+
+impl From<Usage> for base::Usage {
+    fn from(u: Usage) -> Self {
+        base::Usage::new(u.input_tokens, u.output_tokens)
+    }
 }
 
 // `/v1/models` 响应结构
@@ -534,23 +644,67 @@ mod tests {
             "key",
             AnthropicArgs::new("claude").system("be nice"),
         );
-        let messages = vec![
-            AnthropicMessage::new("system", "be brief"),
-            AnthropicMessage::new("user", "hi"),
-        ];
-        let request = model.build_request(messages, Some("user-1"), false);
+        let messages = vec![Message::system("be brief"), Message::user("hi")];
+        let request = model.build_request(&messages, Some("user-1"), false);
         let json = serde_json::to_value(&request).unwrap();
         assert_eq!(json["system"], serde_json::json!("be nice\nbe brief"));
         assert_eq!(json["messages"], serde_json::json!([{"role":"user","content":[{"type":"text","text":"hi"}]}]));
         assert_eq!(json["metadata"], serde_json::json!({"user_id":"user-1"}));
-        // 非流式不携带 stream 字段
+        // 非流式不携带 stream 字段，没有工具不携带 tools
         assert!(json.get("stream").is_none());
+        assert!(json.get("tools").is_none());
+    }
+
+    #[test]
+    fn build_request_maps_tool_round_and_merges_results() {
+        let model = AnthropicModel::new("http://localhost", "key", AnthropicArgs::new("claude"));
+        let call = |id: &str, args: &str| base::ToolCall {
+            id: id.into(),
+            name: "read_file".into(),
+            arguments: args.into(),
+        };
+        let messages = vec![
+            Message::user("read both"),
+            Message::Assistant {
+                content: Some("ok".into()),
+                reasoning: None,
+                // 第二个调用参数非法 JSON，兜底成 {}
+                tool_calls: vec![call("t1", "{\"file_path\":\"a\"}"), call("t2", "not json")],
+            },
+            Message::tool("t1", "A"),
+            Message::tool("t2", "B"),
+            Message::Assistant {
+                content: Some(String::new()),
+                reasoning: None,
+                tool_calls: vec![],
+            },
+            Message::user("thanks"),
+        ];
+        let request = model.build_request(&messages, None, false);
+        let json = serde_json::to_value(&request).unwrap();
+        assert_eq!(
+            json["messages"],
+            serde_json::json!([
+                {"role": "user", "content": [{"type": "text", "text": "read both"}]},
+                {"role": "assistant", "content": [
+                    {"type": "text", "text": "ok"},
+                    {"type": "tool_use", "id": "t1", "name": "read_file", "input": {"file_path": "a"}},
+                    {"type": "tool_use", "id": "t2", "name": "read_file", "input": {}},
+                ]},
+                // 两个 tool_result 与随后的 user 文本合并为一条 user 消息；空 assistant 被丢弃
+                {"role": "user", "content": [
+                    {"type": "tool_result", "tool_use_id": "t1", "content": "A"},
+                    {"type": "tool_result", "tool_use_id": "t2", "content": "B"},
+                    {"type": "text", "text": "thanks"},
+                ]},
+            ])
+        );
     }
 
     #[test]
     fn build_request_includes_stream_flag_when_streaming() {
         let model = AnthropicModel::new("http://localhost", "key", AnthropicArgs::new("claude"));
-        let request = model.build_request(vec![], None, true);
+        let request = model.build_request(&[], None, true);
         assert_eq!(serde_json::to_value(&request).unwrap()["stream"], serde_json::json!(true));
     }
 
@@ -620,8 +774,17 @@ mod tests {
         .unwrap()
         .unwrap();
         assert_eq!(chunk.finish_reason.as_deref(), Some("end_turn"));
+        assert_eq!(chunk.usage, Some(base::Usage::new(0, 5)));
 
-        for ignored in ["message_start", "content_block_stop", "message_stop", "ping"] {
+        let chunk = map_stream_event(event(
+            "message_start",
+            r#"{"type":"message_start","message":{"id":"m","usage":{"input_tokens":11,"output_tokens":1}}}"#,
+        ))
+        .unwrap()
+        .unwrap();
+        assert_eq!(chunk.usage, Some(base::Usage::new(11, 1)));
+
+        for ignored in ["content_block_stop", "message_stop", "ping"] {
             assert!(
                 map_stream_event(event(ignored, "{}")).is_none(),
                 "{ignored} should produce no chunk"

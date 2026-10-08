@@ -8,6 +8,7 @@ use tokio::net::TcpListener;
 use tokio::sync::oneshot;
 
 pub struct MockResponse {
+    pub status: u16,
     pub content_type: &'static str,
     pub body: &'static str,
 }
@@ -15,6 +16,7 @@ pub struct MockResponse {
 impl MockResponse {
     pub fn json(body: &'static str) -> Self {
         Self {
+            status: 200,
             content_type: "application/json",
             body,
         }
@@ -22,7 +24,17 @@ impl MockResponse {
 
     pub fn sse(body: &'static str) -> Self {
         Self {
+            status: 200,
             content_type: "text/event-stream",
+            body,
+        }
+    }
+
+    #[allow(dead_code)]
+    pub fn error(status: u16, body: &'static str) -> Self {
+        Self {
+            status,
+            content_type: "application/json",
             body,
         }
     }
@@ -39,7 +51,8 @@ pub async fn serve_once(response: MockResponse) -> (String, oneshot::Receiver<St
         let request = read_request(&mut socket).await;
 
         let head = format!(
-            "HTTP/1.1 200 OK\r\ncontent-type: {}\r\ncontent-length: {}\r\nconnection: close\r\n\r\n",
+            "HTTP/1.1 {} X\r\ncontent-type: {}\r\ncontent-length: {}\r\nconnection: close\r\n\r\n",
+            response.status,
             response.content_type,
             response.body.len()
         );

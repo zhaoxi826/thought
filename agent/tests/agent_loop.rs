@@ -83,12 +83,13 @@ async fn agent_runs_tool_loop_to_final_answer() {
 
     // 第一轮请求应带上工具定义
     assert!(requests[0].contains("\"get_weather\""), "request 0: {}", requests[0]);
-    // 第二轮请求应包含工具结果（以包裹文本回传）
+    // 第二轮请求应以标准 tool 消息回传结果，并回放 assistant 的 tool_calls
     assert!(
-        requests[1].contains("[tool result: get_weather]"),
+        requests[1].contains(r#""role":"tool","content":"sunny, 25C","tool_call_id":"call_1""#),
         "request 1: {}",
         requests[1]
     );
+    assert!(requests[1].contains(r#""tool_calls":[{"id":"call_1""#), "request 1: {}", requests[1]);
     assert!(requests[1].contains("sunny, 25C"), "request 1: {}", requests[1]);
 }
 
