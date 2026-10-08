@@ -74,6 +74,14 @@ impl Registry {
         self.tools.is_empty()
     }
 
+    /// 并入另一个注册表的全部工具（同名覆盖）。
+    pub fn extend(&mut self, other: &Registry) -> &mut Self {
+        for (name, tool) in &other.tools {
+            self.tools.insert(name.clone(), Arc::clone(tool));
+        }
+        self
+    }
+
     /// 按名字挑出一个子集；有名字不存在时返回 `Err(那个名字)`。
     pub fn subset<S: AsRef<str>>(&self, names: &[S]) -> Result<Registry, String> {
         let mut tools = BTreeMap::new();

@@ -2,7 +2,10 @@
 
 mod common;
 
-use agent::{AgentConfig, AgentError, AgentEvent, AgentSystem, Input, SessionHandle};
+use agent::{
+    AgentConfig, AgentError, AgentEvent, AgentSystem, HistorySink, Input, SessionHandle, SessionOptions,
+};
+use model::Message;
 use common::{text_reply, tool_reply, MockLlm};
 use model::{Function, Model, OpenAiArgs, OpenAiModel};
 use plugin::{Registry, Tool};
@@ -81,7 +84,7 @@ async fn next_reply(rx: &mut broadcast::Receiver<AgentEvent>) -> String {
 }
 
 fn start(system: &AgentSystem) -> (SessionHandle, broadcast::Receiver<AgentEvent>) {
-    let session = system.start_session("s1", vec![]);
+    let session = system.start_session("s1", SessionOptions::default());
     let events = session.subscribe();
     (session, events)
 }
@@ -192,7 +195,7 @@ async fn queued_inputs_are_batched_and_todos_fire() {
     )])
     .await;
     let system = system(&llm.url, config()).unwrap();
-    let session = system.start_session("s1", vec![]);
+    let session = system.start_session("s1", SessionOptions::default());
     let mut events = session.subscribe();
 
     // 主控尚未调度时连发两条，应合并为一批
@@ -235,4 +238,52 @@ fn rejects_config_with_unknown_references() {
     let mut bad = config();
     bad.workers.push(bad.workers[0].clone());
     assert!(matches!(system("http://x", bad), Err(AgentError::Config(m)) if m.contains("duplicate")));
+}
+
+/// 记录每次保存的历史。
+#[derive(Default)]
+struct Recorder(std::sync::Mutex<Vec<Vec<Message>>>);
+
+#[async_trait::async_trait]
+impl HistorySink for Recorder {
+    async fn save(&self, _session_id: &str, history: &[Message]) {
+        self.0.lock().unwrap().push(history.to_vec());
+    }
+}
+
+#[tokio::test]
+async fn session_tools_and_history_sink() {
+    let llm = MockLlm::start(vec![(
+        "ctrl",
+        vec![tool_reply(&[("c1", "get_weather", "{}")]), text_reply("sunny today")],
+    )])
+    .await;
+    // 主控配置里没有 get_weather，只经会话专属工具获得
+    let system = system(&llm.url, config()).unwrap();
+    let mut session_tools = Registry::new();
+    session_tools.register(Arc::new(Weather));
+    let recorder = Arc::new(Recorder::default());
+    let session = system.start_session(
+        "s1",
+        SessionOptions {
+            history: vec![Message::system("stale"), Message::user("earlier"), Message::assistant("ok")],
+            tools: session_tools,
+            sink: Some(recorder.clone()),
+        },
+    );
+    let mut events = session.subscribe();
+    session.send_user("weather?");
+    assert_eq!(next_reply(&mut events).await, "sunny today");
+
+    let ctrl = llm.requests("ctrl");
+    assert!(ctrl[0].contains("\"get_weather\""), "{}", ctrl[0]);
+    assert!(!ctrl[0].contains("stale"), "restored system is replaced");
+    assert!(ctrl[0].contains("earlier"));
+
+    // sink 在回复事件之后才写入，稍等
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    let saved = recorder.0.lock().unwrap().last().cloned().unwrap();
+    assert!(matches!(&saved[0], Message::System { .. }));
+    assert_eq!(saved.last().unwrap(), &Message::assistant("sunny today"));
+    assert_eq!(saved.len(), 7, "system, 2 restored, user, assistant(tool), tool, assistant");
 }

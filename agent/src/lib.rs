@@ -13,7 +13,9 @@ mod tools;
 pub use config::{AgentConfig, ControllerSpec, Limits, WorkerSpec};
 pub use event::{AgentEvent, EventSender, UsageView};
 pub use runner::Runner;
-pub use session::{AgentSystem, Input, SessionHandle, TaskInfo, NO_REPLY};
+pub use session::{
+    AgentSystem, HistorySink, Input, SessionHandle, SessionOptions, TaskInfo, NO_REPLY,
+};
 
 use model::Error as ModelError;
 

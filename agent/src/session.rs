@@ -65,6 +65,24 @@ impl Input {
     }
 }
 
+/// 会话历史持久化出口：主控每处理完一批输入回调一次（含 system 消息）。
+#[async_trait::async_trait]
+pub trait HistorySink: Send + Sync {
+    async fn save(&self, session_id: &str, history: &[Message]);
+}
+
+/// 启动会话的选项。
+#[derive(Default)]
+pub struct SessionOptions {
+    /// 从持久化恢复的历史（其中的 system 消息会被丢弃，按当前配置重建）。
+    pub history: Vec<Message>,
+
+    /// 会话专属工具（如按用户隔离的记忆工具），对主控、worker、子 agent 都可用。
+    pub tools: Registry,
+
+    pub sink: Option<Arc<dyn HistorySink>>,
+}
+
 /// 一个正在运行的任务的概况。
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct TaskInfo {
@@ -132,10 +150,10 @@ impl AgentSystem {
 
     /// 启动一个会话：spawn 主控循环，返回句柄。
     ///
-    /// `history` 用于从持久化恢复（不含 system，system 每次按当前配置重建）。
     /// 所有句柄被丢弃后会话结束，仍在运行的任务一并取消。
-    pub fn start_session(&self, session_id: impl Into<String>, history: Vec<Message>) -> SessionHandle {
+    pub fn start_session(&self, session_id: impl Into<String>, options: SessionOptions) -> SessionHandle {
         let session_id = session_id.into();
+        let SessionOptions { history, tools, sink } = options;
         let (inbox, rx) = mpsc::unbounded_channel();
         let (events, _) = broadcast::channel(1024);
         let shared = Arc::new(Session {
@@ -145,8 +163,9 @@ impl AgentSystem {
             events: events.clone(),
             next_task_id: AtomicU64::new(1),
             tasks: Mutex::new(BTreeMap::new()),
+            session_tools: tools,
         });
-        tokio::spawn(controller_loop(Arc::clone(&shared), rx, history));
+        tokio::spawn(controller_loop(Arc::clone(&shared), rx, history, sink));
         SessionHandle {
             inbox,
             events,
@@ -198,6 +217,7 @@ pub(crate) struct Session {
     events: EventSender,
     next_task_id: AtomicU64,
     tasks: Mutex<BTreeMap<u64, RunningTask>>,
+    pub(crate) session_tools: Registry,
 }
 
 struct RunningTask {
@@ -330,11 +350,12 @@ impl Session {
     /// 构造 L3 子 agent 执行器：工具与父 worker 相同但不能再派生。
     pub(crate) fn subagent_runner(&self, spec: &WorkerSpec, label: String) -> Runner {
         let limits = &self.system.config.limits;
-        let tools = self
+        let mut tools = self
             .system
             .tools
             .subset(&spec.tools)
             .expect("validated in AgentSystem::new");
+        tools.extend(&self.session_tools);
         Runner::new(
             label,
             self.system.models[&spec.model].clone(),
@@ -399,6 +420,7 @@ async fn controller_loop(
     session: Arc<Session>,
     mut rx: mpsc::UnboundedReceiver<Input>,
     restored: Vec<Message>,
+    sink: Option<Arc<dyn HistorySink>>,
 ) {
     let config = &session.system.config;
     let runner = Runner::new(
@@ -442,6 +464,9 @@ async fn controller_loop(
                     message: e.to_string(),
                 });
             }
+        }
+        if let Some(sink) = &sink {
+            sink.save(&session.session_id, &history).await;
         }
     }
     session.abort_all();

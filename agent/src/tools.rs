@@ -27,6 +27,7 @@ pub(crate) fn controller_registry(session: &Arc<Session>) -> Registry {
         .subset(&session.system.config.controller.tools)
         .expect("validated in AgentSystem::new");
     registry
+        .extend(&session.session_tools)
         .register(Arc::new(DispatchTask(Arc::clone(session))))
         .register(Arc::new(ListTasks(Arc::clone(session))))
         .register(Arc::new(CancelTask(Arc::clone(session))))
@@ -41,6 +42,7 @@ pub(crate) fn worker_registry(session: &Arc<Session>, spec: &WorkerSpec, label: 
         .tools
         .subset(&spec.tools)
         .expect("validated in AgentSystem::new");
+    registry.extend(&session.session_tools);
     if spec.can_spawn {
         registry.register(Arc::new(SpawnSubagent {
             session: Arc::clone(session),

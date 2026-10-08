@@ -32,6 +32,18 @@ impl MemoryStore {
         embedder: Option<Arc<dyn Embedder>>,
         extractor: Option<Arc<dyn Extractor>>,
     ) -> Result<Self, MemoryError> {
+        let db = any::connect(config.endpoint.as_str()).await?;
+        Self::with_connection(&db, config, embedder, extractor).await
+    }
+
+    /// 复用已有连接（如与后端共用同一个 SurrealKV 文件，避免重复打开抢文件锁）。
+    /// `config.endpoint` 被忽略，namespace / database 仍取自 `config`。
+    pub async fn with_connection(
+        db: &Surreal<Any>,
+        config: MemoryConfig,
+        embedder: Option<Arc<dyn Embedder>>,
+        extractor: Option<Arc<dyn Extractor>>,
+    ) -> Result<Self, MemoryError> {
         if let Some(e) = &embedder
             && e.dimension() != config.embedding_dimension
         {
@@ -41,7 +53,8 @@ impl MemoryStore {
                 config.embedding_dimension
             )));
         }
-        let db = any::connect(config.endpoint.as_str()).await?;
+        // clone 得到独立 session，切 ns/db 不影响原连接
+        let db = db.clone();
         db.use_ns(config.namespace.as_str()).use_db(config.database.as_str()).await?;
         let store = Self {
             db,

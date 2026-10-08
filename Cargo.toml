@@ -17,9 +17,17 @@ tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter", "fmt"] }
 surrealdb = { version = "=3.3.1", default-features = false, features = ["kv-mem", "kv-surrealkv"] }
 sha2 = "0.10.9"
+axum = "0.8.9"
+jsonwebtoken = { version = "11.1.0", default-features = false, features = ["rust_crypto"] }
+argon2 = "0.6.0"
+uuid = { version = "1.27.0", features = ["v4"] }
+toml = "1.1.7"
+tokio-stream = { version = "0.1.19", features = ["sync"] }
+tower = { version = "0.5", features = ["util"] }
 
 model = {path = "model"}
 agent = {path = "agent"}
 plugin = {path = "plugin"}
 server = {path = "server"}
 symbol = {path = "symbol"}
+thought-core = {path = "thought-core"}
