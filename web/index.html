@@ -4,7 +4,11 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>thought</title>
-<link rel="stylesheet" href="/style.css">
+<link rel="stylesheet" href="/css/base.css">
+<link rel="stylesheet" href="/css/layout.css">
+<link rel="stylesheet" href="/css/chat.css">
+<link rel="stylesheet" href="/css/markdown.css">
+<link rel="stylesheet" href="/css/views.css">
 <link rel="icon" href="data:,">
 </head>
 <body>
@@ -22,58 +26,65 @@
       <span>密码</span>
       <input id="login-password" type="password" required autocomplete="current-password">
     </label>
-    <div id="login-error" class="login-error hidden"></div>
+    <div id="login-error" class="login-error hidden" role="alert"></div>
     <button id="login-submit" class="btn-primary" type="submit">登 录</button>
   </form>
 </div>
 
 <!-- 应用壳 -->
 <div id="app" class="hidden">
-  <aside id="sidebar">
+  <aside id="sidebar" aria-label="侧栏">
     <div class="side-top">
       <div class="brand-row">
         <span class="brand">thought</span>
       </div>
-      <button id="btn-new-session" class="btn-primary btn-block">＋ 新会话</button>
-      <nav class="side-tabs">
-        <button class="tab active" data-view="chat">会话</button>
-        <button class="tab" data-view="memory">记忆</button>
-        <button class="tab" data-view="system">系统</button>
+      <button id="btn-new-session" class="btn-primary btn-block" type="button">＋ 新会话</button>
+      <nav class="side-tabs" aria-label="视图">
+        <button class="tab active" type="button" data-view="chat" aria-current="page">会话</button>
+        <button class="tab" type="button" data-view="memory">记忆</button>
+        <button class="tab" type="button" data-view="system">系统</button>
       </nav>
     </div>
-    <div id="session-list" class="session-list"></div>
+    <nav id="session-list" class="session-list" aria-label="会话列表"></nav>
     <div class="side-foot">
       <div class="user-chip">
-        <span class="user-avatar" id="user-avatar"></span>
+        <span class="user-avatar" id="user-avatar" aria-hidden="true"></span>
         <span id="user-name" class="user-name"></span>
         <span id="user-role" class="role-badge"></span>
       </div>
-      <button id="btn-logout" class="btn-ghost">退出</button>
+      <button id="btn-logout" class="btn-ghost" type="button">退出</button>
     </div>
   </aside>
 
   <main id="main">
     <!-- 会话视图 -->
-    <section id="view-chat" class="view">
+    <section id="view-chat" class="view" aria-labelledby="chat-title">
       <header class="topbar">
-        <button id="btn-sidebar-toggle" class="btn-ghost sidebar-toggle" title="侧栏">☰</button>
+        <button id="btn-sidebar-toggle" class="btn-ghost sidebar-toggle" type="button" title="侧栏"
+                aria-label="打开/关闭侧栏" aria-controls="sidebar" aria-expanded="false">☰</button>
         <span id="chat-title" class="chat-title">会话</span>
         <span id="tasks-badge" class="tasks-badge hidden" title="运行中的任务"></span>
         <span class="spacer"></span>
-        <span id="conn-dot" class="conn-dot" ></span>
-        <span id="conn-text" class="conn-text"></span>
+        <span class="conn" role="status">
+          <span id="conn-dot" class="conn-dot off" aria-hidden="true"></span>
+          <span class="sr-only">连接状态：</span>
+          <span id="conn-text" class="conn-text">未连接</span>
+        </span>
       </header>
-      <div id="messages" class="messages">
+      <!-- role=log 隐含 polite 播报；流式增量不逐字播报，定型回复走 #sr-announce -->
+      <div id="messages" class="messages" role="log" aria-label="消息" aria-live="off">
         <div class="placeholder" id="chat-placeholder">选择左侧会话，或新建一个开始对话</div>
       </div>
+      <div id="sr-announce" class="sr-only" aria-live="polite" aria-atomic="true"></div>
       <div class="composer">
+        <label for="input" class="sr-only">消息内容</label>
         <textarea id="input" rows="1" placeholder="发送消息…（Enter 发送，Shift+Enter 换行）"></textarea>
-        <button id="btn-send" class="btn-primary">发送</button>
+        <button id="btn-send" class="btn-primary" type="button">发送</button>
       </div>
     </section>
 
     <!-- 记忆视图 -->
-    <section id="view-memory" class="view hidden">
+    <section id="view-memory" class="view hidden" aria-label="记忆">
       <header class="topbar">
         <span class="chat-title">记忆</span>
       </header>
@@ -83,18 +94,21 @@
         </div>
         <div id="memory-body">
           <form id="memory-write" class="memory-write">
+            <label for="memory-content" class="sr-only">记忆内容</label>
             <textarea id="memory-content" rows="2" placeholder="手动写入一条记忆…"></textarea>
             <div class="memory-write-row">
+              <label for="memory-tags" class="sr-only">标签（逗号分隔，可空）</label>
               <input id="memory-tags" type="text" placeholder="标签（逗号分隔，可空）">
               <button class="btn-primary" type="submit">写入</button>
             </div>
-            <div id="memory-write-msg" class="form-msg hidden"></div>
+            <div id="memory-write-msg" class="form-msg hidden" role="status"></div>
           </form>
-          <div class="memory-tabs">
-            <button class="tab active" data-mtab="search">搜索</button>
-            <button class="tab" data-mtab="recent">最近</button>
+          <div class="memory-tabs" role="group" aria-label="记忆列表">
+            <button class="tab active" type="button" data-mtab="search" aria-pressed="true">搜索</button>
+            <button class="tab" type="button" data-mtab="recent" aria-pressed="false">最近</button>
           </div>
           <div id="memory-search-row">
+            <label for="memory-q" class="sr-only">搜索记忆</label>
             <input id="memory-q" type="text" placeholder="搜索记忆…（回车）">
           </div>
           <div id="memory-list" class="memory-list"></div>
@@ -103,7 +117,7 @@
     </section>
 
     <!-- 系统视图 -->
-    <section id="view-system" class="view hidden">
+    <section id="view-system" class="view hidden" aria-label="系统">
       <header class="topbar">
         <span class="chat-title">系统</span>
       </header>
@@ -112,6 +126,9 @@
   </main>
 </div>
 
-<script type="module" src="/js/app.js"></script>
+<!-- 全局提示条 -->
+<div id="toasts" class="toasts"></div>
+
+<script type="module" src="/js/main.js"></script>
 </body>
 </html>

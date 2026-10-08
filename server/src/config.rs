@@ -4,6 +4,7 @@ use agent::AgentConfig;
 use model::ModelConfig;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
+use std::path::{Path, PathBuf};
 use symbol::MemoryConfig;
 
 /// 整个后端的配置。
@@ -38,9 +39,9 @@ pub struct HttpConfig {
     #[serde(default = "default_bind")]
     pub bind: String,
 
-    /// 静态前端目录（相对进程 cwd），由服务器同源托管在 `/`。
+    /// 静态前端目录，由服务器同源托管在 `/`。相对路径见 [`ServerConfig::resolve_paths`]。
     #[serde(default = "default_web_dir")]
-    pub web_dir: String,
+    pub web_dir: PathBuf,
 }
 
 impl Default for HttpConfig {
@@ -56,8 +57,32 @@ fn default_bind() -> String {
     "127.0.0.1:8080".to_owned()
 }
 
-fn default_web_dir() -> String {
-    "web".to_owned()
+fn default_web_dir() -> PathBuf {
+    PathBuf::from("web")
+}
+
+impl ServerConfig {
+    /// 把相对路径（`http.web_dir`、`surrealkv://` 存储路径）改为相对 `base`
+    /// （通常是配置文件所在目录），这样从任意工作目录启动结果都一致。
+    pub fn resolve_paths(&mut self, base: &Path) {
+        if self.http.web_dir.is_relative() {
+            self.http.web_dir = base.join(&self.http.web_dir);
+        }
+        resolve_endpoint(&mut self.storage.endpoint, base);
+        if let Some(memory) = &mut self.memory {
+            resolve_endpoint(&mut memory.store.endpoint, base);
+        }
+    }
+}
+
+/// `surrealkv://relative/path` → `surrealkv://<base>/relative/path`；其他协议不动。
+fn resolve_endpoint(endpoint: &mut String, base: &Path) {
+    const SCHEME: &str = "surrealkv://";
+    if let Some(path) = endpoint.strip_prefix(SCHEME)
+        && Path::new(path).is_relative()
+    {
+        *endpoint = format!("{SCHEME}{}", base.join(path).display());
+    }
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -152,4 +177,22 @@ pub(crate) fn secret(plain: &Option<String>, env: &Option<String>) -> Option<Str
         .filter(|s| !s.is_empty())
         .or_else(|| env.as_deref().and_then(|v| std::env::var(v).ok()))
         .filter(|s| !s.is_empty())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn resolves_relative_paths_against_config_dir() {
+        let mut endpoint = "surrealkv://data/thought".to_owned();
+        resolve_endpoint(&mut endpoint, Path::new("/etc/thought"));
+        assert_eq!(endpoint, "surrealkv:///etc/thought/data/thought");
+
+        for fixed in ["surrealkv:///abs/db", "mem://"] {
+            let mut e = fixed.to_owned();
+            resolve_endpoint(&mut e, Path::new("/etc/thought"));
+            assert_eq!(e, fixed);
+        }
+    }
 }

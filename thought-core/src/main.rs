@@ -34,7 +34,13 @@ async fn main() -> ExitCode {
 async fn run() -> Result<(), String> {
     let path = std::env::args().nth(1).unwrap_or_else(|| "thought.toml".to_owned());
     let text = std::fs::read_to_string(&path).map_err(|e| format!("read {path}: {e}"))?;
-    let config: ServerConfig = toml::from_str(&text).map_err(|e| format!("parse {path}: {e}"))?;
+    let mut config: ServerConfig = toml::from_str(&text).map_err(|e| format!("parse {path}: {e}"))?;
+    // 相对路径以配置文件所在目录为准，从任意工作目录启动都一致
+    let base = std::path::Path::new(&path)
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .unwrap_or(std::path::Path::new("."));
+    config.resolve_paths(base);
 
     let tools = plugin::tools::file_tools::builtin_registry();
     let built = server::build(&config, tools).await.map_err(|e| e.to_string())?;

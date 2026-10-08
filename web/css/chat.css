@@ -1,0 +1,344 @@
+/* 会话视图：消息流、运行块、任务卡片、工具卡片 */
+
+/* ---------- 消息流 ---------- */
+
+.messages {
+  flex: 1;
+  overflow-y: auto;
+  padding: 20px 28px 12px;
+}
+
+.placeholder {
+  color: var(--text-dim);
+  text-align: center;
+  padding: 60px 20px;
+  font-size: 14px;
+}
+
+.msg {
+  max-width: 860px;
+  margin: 0 auto 18px;
+  animation: fade-in 0.25s ease;
+}
+
+@keyframes fade-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: none; }
+}
+
+/* 用户消息：左侧色条 */
+.msg-user {
+  border-left: 3px solid var(--accent);
+  background: var(--panel);
+  border-radius: 0 8px 8px 0;
+  padding: 10px 14px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.msg-user .msg-label,
+.reply-block .msg-label {
+  display: block;
+  font-size: 11px;
+  color: var(--text-dim);
+  margin-bottom: 4px;
+  letter-spacing: 0.5px;
+}
+
+/* 助手回复块 */
+.reply-block {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel);
+  padding: 12px 16px;
+  word-break: break-word;
+}
+
+/* 运行块：一轮 agent 活动 */
+.run-block {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--panel);
+  padding: 12px 16px;
+}
+
+.run-block.streaming { border-color: rgba(110, 142, 251, 0.35); }
+
+.stream-label {
+  font-size: 11px;
+  color: var(--text-dim);
+  margin-bottom: 4px;
+  letter-spacing: 0.5px;
+}
+
+.reasoning-stream {
+  color: var(--text-dim);
+  font-style: italic;
+  font-size: 13px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  border-left: 2px solid var(--border);
+  padding-left: 10px;
+  margin-bottom: 6px;
+}
+
+.text-stream {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* 流式光标 */
+.streaming-cursor::after {
+  content: "▍";
+  color: var(--accent);
+  animation: blink 0.9s step-end infinite;
+}
+
+@keyframes blink {
+  50% { opacity: 0; }
+}
+
+.usage-line {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--border);
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.run-error {
+  margin-top: 10px;
+  padding: 8px 12px;
+  border-radius: 6px;
+  background: rgba(224, 108, 117, 0.1);
+  border: 1px solid rgba(224, 108, 117, 0.4);
+  color: var(--red);
+  font-size: 13px;
+}
+
+.run-notice {
+  margin-top: 10px;
+  font-size: 12px;
+  color: var(--yellow);
+}
+
+/* ---------- 任务卡片 ---------- */
+
+.task-card {
+  margin-top: 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel-2);
+  overflow: hidden;
+}
+
+/* 任务/工具卡片头是 <button>：撑满整行、左对齐 */
+.task-head, .tool-head {
+  width: 100%;
+  text-align: left;
+}
+.task-head:focus-visible, .tool-head:focus-visible { outline-offset: -2px; }
+
+.task-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  cursor: pointer;
+  user-select: none;
+}
+.task-head:hover { background: rgba(255, 255, 255, 0.02); }
+
+.task-status { width: 16px; text-align: center; flex-shrink: 0; font-size: 13px; }
+
+.task-card.running .task-status {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border: 2px solid var(--accent);
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.task-card.done .task-status { color: var(--green); }
+.task-card.failed .task-status { color: var(--red); }
+.task-card.cancelled .task-status { color: var(--yellow); }
+
+.task-worker {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--accent);
+  background: var(--accent-dim);
+  padding: 0 7px;
+  border-radius: 8px;
+  flex-shrink: 0;
+}
+
+.task-text {
+  color: var(--text);
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+  flex: 1;
+}
+
+.task-elapsed {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text-dim);
+  flex-shrink: 0;
+}
+
+.task-toggle {
+  color: var(--text-dim);
+  font-size: 11px;
+  flex-shrink: 0;
+  transition: transform 0.15s;
+}
+.task-card.closed .task-toggle { transform: rotate(-90deg); }
+.task-card.closed .task-body { display: none; }
+
+.task-body {
+  border-top: 1px solid var(--border);
+  padding: 10px 14px;
+}
+
+.task-result {
+  margin-top: 8px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  font-size: 13px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.task-result.error { color: var(--red); border-color: rgba(224, 108, 117, 0.4); }
+
+.agent-sub {
+  margin-top: 8px;
+}
+.agent-sub .stream-label {
+  font-family: var(--mono);
+  color: var(--text-dim);
+}
+
+/* ---------- 工具调用卡片 ---------- */
+
+.tool-card {
+  margin-top: 8px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--bg);
+  overflow: hidden;
+}
+
+.tool-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  cursor: pointer;
+  user-select: none;
+  font-size: 12px;
+}
+.tool-head:hover { background: rgba(255, 255, 255, 0.02); }
+
+.tool-status { flex-shrink: 0; font-size: 11px; }
+.tool-card.pending .tool-status { color: var(--yellow); }
+.tool-card.done .tool-status { color: var(--green); }
+
+.tool-name {
+  font-family: var(--mono);
+  color: var(--yellow);
+  flex-shrink: 0;
+}
+
+.tool-summary {
+  font-family: var(--mono);
+  color: var(--text-dim);
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+.tool-toggle {
+  margin-left: auto;
+  color: var(--text-dim);
+  font-size: 11px;
+  flex-shrink: 0;
+  transition: transform 0.15s;
+}
+.tool-card.closed .tool-toggle { transform: rotate(-90deg); }
+.tool-card.closed .tool-detail { display: none; }
+
+.tool-detail { border-top: 1px solid var(--border); }
+
+.tool-section-label {
+  font-size: 10px;
+  color: var(--text-dim);
+  padding: 6px 10px 0;
+  letter-spacing: 0.5px;
+}
+
+.tool-card pre {
+  margin: 0;
+  padding: 6px 10px 10px;
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-all;
+  color: var(--text);
+}
+
+.tool-output-wrap { position: relative; }
+
+.tool-output-wrap.collapsed pre {
+  max-height: 120px;
+  overflow: hidden;
+}
+.tool-output-wrap.collapsed::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 40px;
+  background: linear-gradient(transparent, var(--bg));
+  pointer-events: none;
+}
+
+.tool-expand {
+  display: block;
+  width: 100%;
+  padding: 3px;
+  font-size: 11px;
+  color: var(--accent);
+  background: var(--panel-2);
+  border-top: 1px solid var(--border);
+}
+.tool-expand:hover { filter: brightness(1.2); }
+
+
+/* ---------- 历史思考折叠 ---------- */
+
+.history-reasoning {
+  margin-bottom: 8px;
+  font-size: 13px;
+}
+.history-reasoning summary {
+  color: var(--text-dim);
+  cursor: pointer;
+  font-size: 12px;
+  user-select: none;
+}
+.history-reasoning summary:hover { color: var(--text); }
+.history-reasoning .reasoning-stream { margin-top: 6px; }

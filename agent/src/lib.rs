@@ -4,16 +4,13 @@
 //! - [`SessionHandle`]：向会话的主控队列投递 [`Input`]、订阅 [`AgentEvent`]；
 //! - [`Runner`]：三层共用的 ReAct 执行器，也可单独使用。
 
-mod config;
-mod event;
-mod runner;
-mod session;
-mod tools;
+pub mod core;
+pub mod orchestration;
 
-pub use config::{AgentConfig, ControllerSpec, Limits, WorkerSpec};
-pub use event::{AgentEvent, EventSender, UsageView};
-pub use runner::Runner;
-pub use session::{
+pub use core::config::{AgentConfig, ControllerSpec, Limits, WorkerSpec};
+pub use core::event::{AgentEvent, EventSender, UsageView};
+pub use core::runner::Runner;
+pub use orchestration::session::{
     AgentSystem, HistorySink, Input, SessionHandle, SessionOptions, TaskInfo, NO_REPLY,
 };
 

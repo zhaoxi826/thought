@@ -8,6 +8,7 @@ use server::{build, ServerConfig};
 use std::time::Duration;
 
 const ADMIN_PASSWORD: &str = "admin-password-1";
+const WEB_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../web");
 
 fn config(llm_url: &str) -> ServerConfig {
     serde_json::from_value(json!({
@@ -15,6 +16,7 @@ fn config(llm_url: &str) -> ServerConfig {
             "jwt_secret": "0123456789abcdef0123456789abcdef",
             "bootstrap_admin": { "username": "admin", "password": ADMIN_PASSWORD }
         },
+        "http": { "web_dir": WEB_DIR },
         "storage": { "endpoint": "mem://", "namespace": "t", "database": "server" },
         "models": {
             "ctrl": { "provider": "openai", "model": "ctrl", "base_url": llm_url, "api_key": "sk-test" },
@@ -224,4 +226,30 @@ async fn memory_endpoints() {
 
     assert_eq!(app.call("DELETE", &format!("/api/memory/{id}"), Some(&admin), None).await.0, 204);
     assert_eq!(app.call("DELETE", &format!("/api/memory/{id}"), Some(&admin), None).await.0, 404);
+}
+
+#[tokio::test]
+async fn serves_spa_with_security_headers() {
+    let llm = MockLlm::start(vec![]).await;
+    let app = App::start(&llm.url).await;
+
+    let index = app.http.get(format!("{}/", app.base)).send().await.unwrap();
+    assert_eq!(index.status(), 200);
+    let csp = index.headers()["content-security-policy"].to_str().unwrap().to_owned();
+    assert!(csp.contains("default-src 'self'"), "{csp}");
+    assert_eq!(index.headers()["x-content-type-options"], "nosniff");
+    assert!(index.text().await.unwrap().contains("<html"));
+
+    // 前端深链兜底到 index.html，状态码 200
+    let deep = app.http.get(format!("{}/sessions/abc", app.base)).send().await.unwrap();
+    assert_eq!(deep.status(), 200);
+
+    // API 未匹配仍是 JSON 404，且同样带安全头
+    let api = app.http.get(format!("{}/api/nope", app.base)).send().await.unwrap();
+    assert_eq!(api.status(), 404);
+    assert!(api.headers().contains_key("content-security-policy"));
+
+    // 路径穿越被拒绝
+    let traversal = app.http.get(format!("{}/..%2fCargo.toml", app.base)).send().await.unwrap();
+    assert!(!traversal.text().await.unwrap().contains("[package]"));
 }

@@ -1,0 +1,137 @@
+/* thought 前端样式：深色主题，完全自包含。 */
+
+:root {
+  --bg: #0f1115;
+  --panel: #161a22;
+  --panel-2: #1b2029;
+  --border: #232834;
+  --text: #e6e9f0;
+  --text-dim: #8b93a7;
+  --accent: #6e8efb;
+  --accent-dim: rgba(110, 142, 251, 0.14);
+  --green: #4cc38a;
+  --yellow: #e5c07b;
+  --red: #e06c75;
+  --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+    "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  height: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--sans);
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.hidden { display: none !important; }
+
+button {
+  font-family: inherit;
+  font-size: inherit;
+  cursor: pointer;
+  border: none;
+  background: none;
+  color: inherit;
+}
+
+input, textarea {
+  font-family: inherit;
+  font-size: inherit;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 10px;
+  transition: border-color 0.15s;
+}
+input:focus, textarea:focus { border-color: var(--accent); }
+
+/* 键盘焦点环（:focus-visible 只在键盘导航时出现） */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+input:focus-visible, textarea:focus-visible { outline-offset: 0; }
+
+/* 视觉隐藏，但读屏可见 */
+.sr-only {
+  position: absolute !important;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+code, pre { font-family: var(--mono); }
+
+.btn-primary {
+  background: var(--accent);
+  color: #0d1020;
+  font-weight: 600;
+  border-radius: 6px;
+  padding: 8px 16px;
+  transition: filter 0.15s, transform 0.05s;
+}
+.btn-primary:hover { filter: brightness(1.12); }
+.btn-primary:active { transform: translateY(1px); }
+.btn-primary:disabled { opacity: 0.5; cursor: default; filter: none; }
+
+.btn-ghost {
+  color: var(--text-dim);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 5px 10px;
+  transition: color 0.15s, border-color 0.15s;
+}
+.btn-ghost:hover { color: var(--text); border-color: var(--text-dim); }
+
+.btn-block { width: 100%; }
+
+/* ---------- 提示条（toast） ---------- */
+
+.toasts {
+  position: fixed;
+  z-index: 50;
+  right: 16px;
+  bottom: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: min(420px, calc(100vw - 32px));
+  pointer-events: none;
+}
+
+.toast {
+  pointer-events: auto;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  font-size: 13px;
+  word-break: break-word;
+}
+.toast.error { border-color: rgba(224, 108, 117, 0.5); color: var(--red); }
+.toast-text { flex: 1; }
+.toast-close { color: var(--text-dim); padding: 0 4px; line-height: 1.4; }
+.toast-close:hover { color: var(--text); }
+
+/* ---------- 滚动条 ---------- */
+
+::-webkit-scrollbar { width: 9px; height: 9px; }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 5px; }
+::-webkit-scrollbar-thumb:hover { background: #2e3542; }
+::-webkit-scrollbar-track { background: transparent; }

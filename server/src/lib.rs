@@ -3,18 +3,15 @@
 //! 组装入口是 [`build`]：按 [`ServerConfig`] 打开存储、构造模型池 / 工具池 /
 //! agent 系统 / 记忆器，返回可直接 `axum::serve` 的 [`Router`](axum::Router)。
 
-pub mod auth;
 pub mod config;
-pub mod db;
-pub mod error;
+pub mod core;
 pub mod routes;
-pub mod state;
 
 pub use config::ServerConfig;
-pub use state::AppState;
+pub use core::state::AppState;
 
 use agent::AgentSystem;
-use auth::{Jwt, Role};
+use core::auth::{Jwt, Role};
 use axum::Router;
 use config::secret;
 use model::{EmbeddingModel, Model};
@@ -47,6 +44,9 @@ pub struct Built {
 }
 
 /// 按配置组装后端。`tools` 是可供 agent 使用的真实工具池（文件、命令等）。
+///
+/// 配置里的相对路径（如 `http.web_dir`）按进程工作目录解析；从配置文件加载时
+/// 先调用 [`ServerConfig::resolve_paths`] 改为相对配置文件所在目录。
 pub async fn build(config: &ServerConfig, tools: Registry) -> Result<Built, BuildError> {
     let jwt_secret = secret(&config.auth.jwt_secret, &config.auth.jwt_secret_env)
         .ok_or_else(|| BuildError("auth: jwt_secret / jwt_secret_env is not set".into()))?;
@@ -62,7 +62,7 @@ pub async fn build(config: &ServerConfig, tools: Registry) -> Result<Built, Buil
     let conn = surrealdb::engine::any::connect(config.storage.endpoint.as_str())
         .await
         .map_err(|e| fail("storage", e))?;
-    let db = db::Db::new(&conn, &config.storage.namespace, &config.storage.database)
+    let db = core::db::Db::new(&conn, &config.storage.namespace, &config.storage.database)
         .await
         .map_err(|e| fail("storage", e))?;
     bootstrap_admin(config, &db).await?;
@@ -104,7 +104,7 @@ pub async fn build(config: &ServerConfig, tools: Registry) -> Result<Built, Buil
 }
 
 /// 没有任何用户时按配置创建管理员。
-async fn bootstrap_admin(config: &ServerConfig, db: &db::Db) -> Result<(), BuildError> {
+async fn bootstrap_admin(config: &ServerConfig, db: &core::db::Db) -> Result<(), BuildError> {
     let count = db.user_count().await.map_err(|e| fail("storage", e.message))?;
     if count > 0 {
         return Ok(());

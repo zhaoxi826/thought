@@ -1,0 +1,209 @@
+/* 记忆视图 / 系统视图 */
+
+/* ---------- 记忆视图 ---------- */
+
+.memory-write {
+  max-width: 860px;
+  margin: 0 auto 16px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.memory-write textarea { resize: vertical; min-height: 48px; }
+
+.memory-write-row { display: flex; gap: 8px; }
+.memory-write-row input { flex: 1; }
+
+.form-msg { font-size: 12px; color: var(--green); }
+.form-msg.err { color: var(--red); }
+
+.memory-tabs {
+  max-width: 860px;
+  margin: 0 auto 10px;
+  display: flex;
+  gap: 4px;
+}
+.memory-tabs .tab {
+  padding: 5px 14px;
+  border-radius: 6px;
+  color: var(--text-dim);
+  border: 1px solid transparent;
+}
+.memory-tabs .tab:hover { color: var(--text); }
+.memory-tabs .tab.active {
+  color: var(--accent);
+  background: var(--accent-dim);
+}
+
+#memory-search-row { max-width: 860px; margin: 0 auto 12px; }
+#memory-search-row input { width: 100%; }
+
+.memory-list {
+  max-width: 860px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.memory-item {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px 14px;
+  animation: fade-in 0.2s ease;
+}
+
+.memory-content { white-space: pre-wrap; word-break: break-word; }
+
+.memory-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.score-bar {
+  width: 80px;
+  height: 5px;
+  border-radius: 3px;
+  background: var(--border);
+  overflow: hidden;
+  flex-shrink: 0;
+}
+.score-bar i {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+}
+
+.score-num { font-family: var(--mono); }
+
+.channel-badge {
+  font-family: var(--mono);
+  font-size: 10px;
+  padding: 0 6px;
+  border-radius: 8px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+}
+.channel-badge b { color: var(--accent); font-weight: 600; }
+
+.tag-chip {
+  font-size: 10px;
+  padding: 0 7px;
+  border-radius: 8px;
+  background: var(--accent-dim);
+  color: var(--accent);
+}
+
+.memory-relations {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--text-dim);
+  font-family: var(--mono);
+}
+
+.memory-del {
+  margin-left: auto;
+  color: var(--text-dim);
+  font-size: 12px;
+  padding: 1px 8px;
+  border-radius: 5px;
+}
+.memory-del:hover { color: var(--red); background: rgba(224, 108, 117, 0.12); }
+
+/* ---------- 系统视图 ---------- */
+
+.system-body-inner {
+  max-width: 860px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.sys-section-title {
+  font-size: 13px;
+  color: var(--text-dim);
+  letter-spacing: 1px;
+  margin: 6px 0 10px;
+}
+
+.agent-card {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px 16px;
+  margin-bottom: 10px;
+}
+
+.agent-card-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.agent-name { font-family: var(--mono); font-weight: 700; color: var(--accent); }
+
+.agent-model {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--yellow);
+  background: rgba(229, 192, 123, 0.1);
+  padding: 1px 8px;
+  border-radius: 8px;
+}
+
+.agent-spawn {
+  font-size: 10px;
+  padding: 1px 8px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+}
+.agent-spawn.yes { color: var(--green); border-color: rgba(76, 195, 138, 0.35); }
+
+.agent-desc { margin-top: 6px; color: var(--text-dim); font-size: 13px; }
+
+.agent-tools { margin-top: 8px; display: flex; flex-wrap: wrap; gap: 6px; }
+
+.tool-chip {
+  font-family: var(--mono);
+  font-size: 11px;
+  padding: 1px 8px;
+  border-radius: 8px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+}
+
+.models-table {
+  width: 100%;
+  border-collapse: collapse;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+  font-size: 13px;
+}
+
+.models-table th, .models-table td {
+  text-align: left;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+}
+.models-table th { color: var(--text-dim); font-weight: 500; font-size: 12px; background: var(--panel-2); }
+.models-table tr:last-child td { border-bottom: none; }
+.models-table td.mono { font-family: var(--mono); font-size: 12px; }
+
+.sys-error { color: var(--red); font-size: 13px; }

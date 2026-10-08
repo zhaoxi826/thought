@@ -54,8 +54,28 @@ export DEEPSEEK_API_KEY=sk-...
 cargo run --release -p thought-core -- thought.toml
 ```
 
-前端：`web/` 是纯静态 SPA（原生 HTML/CSS/ES modules，无构建步骤），由服务器同源托管在 `/`
-（静态目录由 `http.web_dir` 配置，默认 `./web`）。浏览器打开监听地址即可登录使用。
+前端：`web/` 是纯静态 SPA（原生 HTML/CSS/ES modules，无构建步骤），由服务器同源托管在 `/`。
+`http.web_dir` 默认 `web`；配置里的相对路径（`web_dir`、`surrealkv://` 存储路径）都相对
+配置文件所在目录解析。浏览器打开监听地址即可登录使用。
+
+打包：
+
+```bash
+cargo build --profile dist -p thought-core    # strip + thin LTO，产物 target/dist/thought
+```
+
+发布物 = `thought` 二进制（约 110MB，gzip 后约 40MB，主要是内嵌的 SurrealDB）+ `web/`
+（约 140KB）+ `thought.toml`。
+
+## 目录结构
+
+```
+model/src/    core/（消息、输出、流式、工具定义、错误） providers/（openai、anthropic、embedding、config、sse）
+agent/src/    core/（配置、事件、Runner） orchestration/（会话队列、元工具）
+symbol/src/   memory/（store、retrieve、extract、embed、text、tools、types）
+server/src/   core/（auth、db、error、state） routes/（auth、admin、sessions、memory、web）
+web/          css/  js/{lib,views}/
+```
 
 ## HTTP 接口
 

@@ -32,3 +32,9 @@ plugin = {path = "plugin"}
 server = {path = "server"}
 symbol = {path = "symbol"}
 thought-core = {path = "thought-core"}
+# 发布用：cargo build --profile dist -p thought-core
+[profile.dist]
+inherits = "release"
+strip = true
+lto = "thin"
+codegen-units = 1
