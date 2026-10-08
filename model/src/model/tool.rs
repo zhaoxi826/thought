@@ -23,7 +23,8 @@ impl Function {
     /// 生成参数的 JSON Schema 对象：`{ "type": "object", "properties": {...},
     /// "required": [...] }`。OpenAI 与 Anthropic 都用这一份，只是外层包裹不同。
     pub fn schema_object(&self) -> serde_json::Value {
-        let mut properties = std::collections::HashMap::<String, serde_json::Value>::new();
+        // serde_json::Map 默认有序（BTreeMap），保证同一工具每次序列化字节一致（利于 prompt 缓存）
+        let mut properties = serde_json::Map::new();
         let mut required = Vec::<String>::new();
 
         for param in &self.parameters {
@@ -66,6 +67,26 @@ pub struct Parameter {
     /// 在 schema 的 `required` 数组中，只有 `required = true` 的参数名会被加入。
     #[serde(skip)]
     pub required: bool,
+}
+
+impl Parameter {
+    /// 必填参数。
+    pub fn required(name: impl Into<String>, description: impl Into<String>, r#type: ParameterType) -> Self {
+        Self {
+            name: name.into(),
+            description: description.into(),
+            r#type,
+            required: true,
+        }
+    }
+
+    /// 可选参数。
+    pub fn optional(name: impl Into<String>, description: impl Into<String>, r#type: ParameterType) -> Self {
+        Self {
+            required: false,
+            ..Self::required(name, description, r#type)
+        }
+    }
 }
 
 impl Default for Parameter {

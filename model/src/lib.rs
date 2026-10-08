@@ -6,6 +6,9 @@ pub use model::base::{
     StreamAccumulator, ToolCall, ToolCallDelta, Usage,
 };
 
+// 可序列化的模型配置
+pub use model::config::{ConfigError, ModelConfig, Provider};
+
 // 协议中立的工具定义
 pub use model::tool::{Function, Parameter, ParameterType};
 

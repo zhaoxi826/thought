@@ -4,7 +4,7 @@
 //! JSON 参数串、输出结果文本”的执行逻辑。[`Registry`] 按工具名统一持有与分发。
 
 use model::Function;
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 /// 一个可被 agent 调用的工具。
@@ -24,9 +24,12 @@ pub trait Tool: Send + Sync {
 }
 
 /// 工具注册表：按名字持有一组工具，供 agent 收集定义与分发调用。
+///
+/// 按名字有序存放，[`definitions`](Registry::definitions) 每次顺序一致，
+/// 请求体字节稳定（利于 prompt 缓存）。`Clone` 只拷贝 `Arc`。
 #[derive(Default, Clone)]
 pub struct Registry {
-    tools: HashMap<String, Arc<dyn Tool>>,
+    tools: BTreeMap<String, Arc<dyn Tool>>,
 }
 
 impl Registry {
@@ -56,5 +59,29 @@ impl Registry {
     /// 是否已注册某工具。
     pub fn contains(&self, name: &str) -> bool {
         self.tools.contains_key(name)
+    }
+
+    /// 已注册的工具名（有序）。
+    pub fn names(&self) -> impl Iterator<Item = &str> {
+        self.tools.keys().map(String::as_str)
+    }
+
+    pub fn len(&self) -> usize {
+        self.tools.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.tools.is_empty()
+    }
+
+    /// 按名字挑出一个子集；有名字不存在时返回 `Err(那个名字)`。
+    pub fn subset<S: AsRef<str>>(&self, names: &[S]) -> Result<Registry, String> {
+        let mut tools = BTreeMap::new();
+        for name in names {
+            let name = name.as_ref();
+            let tool = self.tools.get(name).ok_or_else(|| name.to_owned())?;
+            tools.insert(name.to_owned(), Arc::clone(tool));
+        }
+        Ok(Registry { tools })
     }
 }

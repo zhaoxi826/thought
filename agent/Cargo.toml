@@ -4,12 +4,14 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-reqwest = {workspace = true}
 tokio = { workspace = true }
-tokio-test = {workspace = true}
-model = {workspace = true}
-plugin = {workspace = true}
+futures = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+async-trait = { workspace = true }
+tracing = { workspace = true }
+model = { workspace = true }
+plugin = { workspace = true }
 
 [dev-dependencies]
-async-trait = {workspace = true}
-serde_json = {workspace = true}
+tokio-test = { workspace = true }
