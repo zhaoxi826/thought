@@ -139,7 +139,7 @@ println!("{:?}", output.content);
 
 相关类型：`OpenAiVendor`、`Thinking` / `ThinkingType` / `ThinkingConfig`、`ToolChoice`、
 `OpenaiTool` / `Function` / `Parameter` / `ParameterType`、`ResponseFormat`、`ChatResponse`。
-常量：`OPENAI_BASE_URL`、`DEEPSEEK_BASE_URL`。
+常量：`OPENAI_BASE_URL`（含 `/v1`）、`DEEPSEEK_BASE_URL`。自定义 `base_url` 时同样写到版本前缀为止。
 
 ### Anthropic 协议
 
@@ -156,6 +156,14 @@ println!("{:?}", output.content);
 - `.max_tokens(u32)` `.system(impl Into<String>)` `.temperature(u8)` `.top_p(u8)` `.tools(&[Function])`
 
 常量：`ANTHROPIC_BASE_URL`、`DEFAULT_VERSION`、`DEFAULT_MAX_TOKENS`。
+
+### 向量化与配置
+
+- **`EmbeddingModel::new(base_url, api_key, model).dimensions(n)`** —— OpenAI 兼容 `/embeddings`，
+  `embed(&[String]) -> Vec<Vec<f32>>`，输出顺序与输入一致。
+- **`ModelConfig`** `{ provider: openai|deepseek|anthropic, model, base_url, api_key | api_key_env,
+  temperature, top_p, max_tokens, thinking }` —— 配置文件友好的描述，`build()` 得到 `Model`；
+  `api_key` 永不序列化输出。
 
 ### 跨协议公共件（`base`）
 

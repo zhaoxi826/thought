@@ -9,6 +9,9 @@ pub use model::base::{
 // 可序列化的模型配置
 pub use model::config::{ConfigError, ModelConfig, Provider};
 
+// OpenAI 兼容向量化
+pub use model::embedding::EmbeddingModel;
+
 // 协议中立的工具定义
 pub use model::tool::{Function, Parameter, ParameterType};
 

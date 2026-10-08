@@ -12,7 +12,8 @@ use reqwest::Client;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::sync::Arc;
 
-pub const OPENAI_BASE_URL: &str = "https://api.openai.com";
+/// 含 `/v1` 前缀：请求拼成 `{base}/chat/completions`、`{base}/models`。
+pub const OPENAI_BASE_URL: &str = "https://api.openai.com/v1";
 pub const DEEPSEEK_BASE_URL: &str = "https://api.deepseek.com";
 
 // `/chat/completions` 请求结构
