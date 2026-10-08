@@ -54,6 +54,8 @@ pub enum Error {
 
     /// 响应里没有任何 choice，无法取出回复内容。
     EmptyResponse,
+    /// 响应数据无法按协议解析（例如流式事件体损坏）。
+    Protocol(String),
 }
 
 impl std::fmt::Display for Error {
@@ -61,6 +63,7 @@ impl std::fmt::Display for Error {
         match self {
             Error::Http(e) => write!(f, "http error: {e}"),
             Error::EmptyResponse => write!(f, "response contained no choices"),
+            Error::Protocol(msg) => write!(f, "protocol error: {msg}"),
         }
     }
 }
@@ -69,7 +72,7 @@ impl std::error::Error for Error {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Error::Http(e) => Some(e),
-            Error::EmptyResponse => None,
+            Error::EmptyResponse | Error::Protocol(_) => None,
         }
     }
 }
@@ -80,6 +83,74 @@ impl From<reqwest::Error> for Error {
     }
 }
 
+/// 一次非流式 chat 的结构化结果（协议中立）。
+#[derive(Debug, Clone, Default)]
+pub struct ChatOutput {
+    /// 文本内容；模型只回工具调用、没有文本时为 `None`。
+    pub content: Option<String>,
+
+    /// 推理内容（DeepSeek 思考模式的 `reasoning_content` 等）。
+    pub reasoning: Option<String>,
+
+    /// 模型请求的工具调用。
+    pub tool_calls: Vec<ToolCall>,
+
+    /// 结束原因，协议原生字符串（OpenAI `stop` / `tool_calls`，
+    /// Anthropic `end_turn` / `tool_use` / `max_tokens` 等）。
+    pub finish_reason: String,
+
+    /// token 用量。
+    pub usage: Usage,
+}
+
+/// token 用量（协议中立；Anthropic 的 input/output 映射为 prompt/completion）。
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Usage {
+    pub prompt_tokens: u32,
+    pub completion_tokens: u32,
+    pub total_tokens: u32,
+}
+
+/// 一次完整的工具调用（协议中立）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ToolCall {
+    /// 调用 id，回传工具结果时用它对应（OpenAI 的 tool_call_id / Anthropic 的 tool_use_id）。
+    pub id: String,
+
+    /// 工具名。
+    pub name: String,
+
+    /// 原始 JSON 参数串。
+    pub arguments: String,
+}
+
+/// 流式工具调用增量。
+///
+/// 同一 `index` 的片段属于同一次调用：`id` / `name` 只在首个片段出现，
+/// `arguments` 是 JSON 参数串的碎片，需要调用方按序拼接。
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ToolCallDelta {
+    pub index: u32,
+    pub id: Option<String>,
+    pub name: Option<String>,
+    pub arguments: Option<String>,
+}
+
+/// 流式 chunk（协议中立）。
+///
+/// 每个字段都是增量：`content` / `reasoning` 为文本碎片，`tool_calls` 为工具调用
+/// 碎片（见 [`ToolCallDelta`]），`finish_reason` 只在最后一帧出现。
+#[derive(Debug, Clone, Default)]
+pub struct ChatChunk {
+    pub content: Option<String>,
+    pub reasoning: Option<String>,
+    pub tool_calls: Vec<ToolCallDelta>,
+    pub finish_reason: Option<String>,
+}
+
+/// 流式 chat 的 chunk 流。
+pub type ChatStream = futures::stream::BoxStream<'static, Result<ChatChunk, Error>>;
+
 /// 模型适配器统一 trait。
 ///
 /// 用关联类型 `Message` 区分不同接口所接受的消息格式：
@@ -88,13 +159,21 @@ pub trait Model {
     /// 该实现所接受的消息格式。
     type Message: Message;
 
-    /// 非流式 chat。
+    /// 非流式 chat，返回结构化结果（文本 + 工具调用 + 结束原因 + 用量）。
     fn chat(
         &self,
         messages: Vec<Self::Message>,
         user_id: Option<&str>,
         response_format: Option<&str>,
-    ) -> impl std::future::Future<Output = Result<String, Error>> + Send;
+    ) -> impl std::future::Future<Output = Result<ChatOutput, Error>> + Send;
+
+    /// 流式 chat：建立连接后返回 chunk 流，逐帧产出增量。
+    fn chat_stream(
+        &self,
+        messages: Vec<Self::Message>,
+        user_id: Option<&str>,
+        response_format: Option<&str>,
+    ) -> impl std::future::Future<Output = Result<ChatStream, Error>> + Send;
 
     /// 拉取可用模型列表，写入自身 `model_list`。
     fn get_models(&mut self) -> impl std::future::Future<Output = Result<(), Error>> + Send;
@@ -171,5 +250,40 @@ impl Message for AnthropicMessage {
                 text: content.into(),
             }],
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::percent;
+    use serde::{Deserialize, Serialize};
+
+    #[derive(Serialize, Deserialize)]
+    struct WithPercent {
+        #[serde(with = "percent")]
+        value: u8,
+    }
+
+    #[test]
+    fn percent_serialize_decimal_string() {
+        let cases = [(0, "0"), (5, "0.05"), (70, "0.7"), (100, "1"), (150, "1.5")];
+        for (input, expected) in cases {
+            let json = serde_json::to_string(&WithPercent { value: input }).unwrap();
+            assert_eq!(json, format!("{{\"value\":{expected}}}"), "input {input}");
+        }
+    }
+
+    #[test]
+    fn percent_deserialize_roundtrip() {
+        let w: WithPercent = serde_json::from_str("{\"value\":0.7}").unwrap();
+        assert_eq!(w.value, 70);
+        let w: WithPercent = serde_json::from_str("{\"value\":1}").unwrap();
+        assert_eq!(w.value, 100);
+    }
+
+    #[test]
+    fn percent_deserialize_out_of_range() {
+        assert!(serde_json::from_str::<WithPercent>("{\"value\":2.5}").is_err());
+        assert!(serde_json::from_str::<WithPercent>("{\"value\":-0.1}").is_err());
     }
 }

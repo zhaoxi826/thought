@@ -8,7 +8,7 @@ members = ["agent", "model","plugin", "server", "symbol", "thought-core"]
 tokio = { version = "1.52.3", features = ["full"] }
 tokio-test = {version = "0.4.5"}
 
-reqwest = { version = "0.13.4", features = ["json"] }
+reqwest = { version = "0.13.4", features = ["json", "stream"] }
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = { version = "1.0.150", features = ["raw_value"] }
 futures = "0.3.32"

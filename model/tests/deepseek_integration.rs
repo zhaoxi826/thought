@@ -18,6 +18,7 @@ fn api_key() -> String {
 }
 
 #[tokio::test]
+#[ignore = "needs network and API_KEY"]
 async fn test_deepseek_get_models() {
     let mut deepseek_model =
         OpenAiModel::deepseek(BASE_URL, &api_key(), OpenAiArgs::deepseek("deepseek-v4-pro"));
@@ -38,6 +39,7 @@ async fn test_deepseek_get_models() {
 }
 
 #[tokio::test]
+#[ignore = "needs network and API_KEY"]
 async fn test_deepseek_chat() {
     let deepseek_model =
         OpenAiModel::deepseek(BASE_URL, &api_key(), OpenAiArgs::deepseek("deepseek-v4-pro"));
@@ -47,10 +49,43 @@ async fn test_deepseek_chat() {
         OpenAIMessage::new("user", "Hi"),
     ];
 
-    let reply = deepseek_model
+    let output = deepseek_model
         .chat(messages, None, None)
         .await
         .expect("chat should succeed");
-    assert!(!reply.is_empty(), "chat reply should not be empty");
-    println!("{}", reply);
+    let content = output.content.expect("chat reply should have content");
+    assert!(!content.is_empty(), "chat reply should not be empty");
+    assert!(output.usage.total_tokens > 0, "usage should be reported");
+    println!("{content}");
+}
+
+#[tokio::test]
+#[ignore = "needs network and API_KEY"]
+async fn test_deepseek_chat_stream() {
+    use futures::StreamExt;
+
+    let deepseek_model =
+        OpenAiModel::deepseek(BASE_URL, &api_key(), OpenAiArgs::deepseek("deepseek-v4-pro"));
+
+    let messages: Vec<OpenAIMessage> = vec![OpenAIMessage::new("user", "Hi")];
+    let mut stream = deepseek_model
+        .chat_stream(messages, None, None)
+        .await
+        .expect("chat_stream should connect");
+
+    let mut text = String::new();
+    let mut finish_reason = None;
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.expect("chunk should parse");
+        if let Some(content) = chunk.content {
+            text.push_str(&content);
+        }
+        if chunk.finish_reason.is_some() {
+            finish_reason = chunk.finish_reason;
+        }
+    }
+
+    assert!(!text.is_empty(), "streamed reply should not be empty");
+    assert!(finish_reason.is_some(), "stream should carry a finish reason");
+    println!("{text}");
 }

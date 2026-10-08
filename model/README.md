@@ -52,7 +52,8 @@ let messages = vec![
     OpenAIMessage::new("system", "You are a helpful assistant."),
     OpenAIMessage::new("user", "Hi"),
 ];
-let reply = m.chat(messages, None, None).await?;
+let output = m.chat(messages, None, None).await?;
+println!("{:?}", output.content);
 # Ok(())
 # }
 ```
@@ -67,16 +68,33 @@ Anthropic 分支内部转成 content block。
 | 方法 | 说明 |
 | --- | --- |
 | `Model::OpenAi(OpenAiModel)` / `Model::Anthropic(AnthropicModel)` | 两个协议 arm |
-| `async chat(messages: Vec<OpenAIMessage>, user_id: Option<&str>, response_format: Option<&str>) -> Result<String, Error>` | 非流式对话，返回首个回复文本 |
+| `async chat(messages: Vec<OpenAIMessage>, user_id: Option<&str>, response_format: Option<&str>) -> Result<ChatOutput, Error>` | 非流式对话，返回结构化结果（文本 + 工具调用 + 结束原因 + 用量） |
+| `async chat_stream(...) -> Result<ChatStream, Error>` | 流式对话，返回逐帧增量的 chunk 流 |
 | `async get_models(&mut self) -> Result<(), Error>` | 拉取模型列表写入 `model_list` |
+| `set_tools(Vec<Function>)` | 覆盖可用工具列表，构造请求时各协议自行翻译成 wire 格式 |
 
 ### 统一 trait：`ModelTrait`（`base::Model`）
 
 各客户端实现的泛型接口，用关联类型区分消息格式。
 
 - `type Message: Message` —— OpenAI 侧为 `OpenAIMessage`，Anthropic 侧为 `AnthropicMessage`
-- `async chat(messages: Vec<Self::Message>, user_id, response_format) -> Result<String, Error>`
+- `async chat(messages: Vec<Self::Message>, user_id, response_format) -> Result<ChatOutput, Error>`
+- `async chat_stream(messages: Vec<Self::Message>, user_id, response_format) -> Result<ChatStream, Error>`
 - `async get_models(&mut self) -> Result<(), Error>`
+
+### 结构化输出与流式（`base`）
+
+- **`ChatOutput`** `{ content: Option<String>, reasoning: Option<String>, tool_calls: Vec<ToolCall>,
+  finish_reason: String, usage: Usage }` —— 非流式结果。模型只回工具调用时 `content` 为 `None`；
+  `finish_reason` 为协议原生字符串（OpenAI `stop` / `tool_calls`，Anthropic `end_turn` /
+  `tool_use` / `max_tokens`）。
+- **`ChatStream`** = `BoxStream<'static, Result<ChatChunk, Error>>` —— 流式结果。
+  **`ChatChunk`** 的每个字段都是增量：`content` / `reasoning` 为文本碎片，
+  `tool_calls: Vec<ToolCallDelta>` 为工具调用碎片（`id` / `name` 只在首个片段出现，
+  `arguments` 需按 `index` 自行拼接），`finish_reason` 只在最后一帧出现。
+- **`ToolCall`** `{ id, name, arguments }` —— 一次完整工具调用，`arguments` 为原始 JSON 参数串。
+- **`Usage`** `{ prompt_tokens, completion_tokens, total_tokens }` —— Anthropic 的
+  input/output 映射为 prompt/completion。
 
 ### OpenAI 协议（DeepSeek 为预设）
 
@@ -122,8 +140,9 @@ Anthropic 分支内部转成 content block。
 
 ### 跨协议公共件（`base`）
 
-- **`Error`** —— `Http(reqwest::Error)` / `EmptyResponse`；实现 `Display` / `std::error::Error` /
-  `From<reqwest::Error>`。响应无内容时返回 `EmptyResponse` 而非静默空串。
+- **`Error`** —— `Http(reqwest::Error)` / `EmptyResponse` / `Protocol(String)`（流式事件体等
+  无法按协议解析）；实现 `Display` / `std::error::Error` / `From<reqwest::Error>`。
+  响应无内容时返回 `EmptyResponse` 而非静默空串。
 - **`Message` trait** —— `role()` / `content()` / `new(role, content)`
 - **`OpenAIMessage`** `{ role, content }`、**`AnthropicMessage`** `{ role, content: Vec<block> }`
   （含 `AnthropicContentBlock`）
@@ -138,17 +157,32 @@ number 输出，**全程不经过 f32/f64**，既无浮点误差也无精度损�
 
 ## 现状与限制
 
-- **流式未实现**：`stream` 恒为 `false`，`ChatRequest` 中保留字段占位。
-- **只返回文本**：`chat()` 返回首个 choice / block 的文本内容。OpenAI 响应里的
-  `tool_calls`、`reasoning_content` 能反序列化，但当前不通过 `chat()` 暴露。
+- **消息模型还是纯文本**：`OpenAIMessage` / `AnthropicMessage` 只有 `{role, content}`，
+  工具结果回传（`tool` 角色 / `tool_result` 块）与 assistant 的 `tool_calls` 回放进消息
+  尚未支持——工具调用目前只能通过 `ChatOutput::tool_calls` 拿到，多轮工具循环的消息
+  模型待补。
+- **流式不回传用量**：SSE chunk 里的 usage（OpenAI `stream_options`、Anthropic
+  `message_delta.usage`）暂未解析进 `ChatChunk`。
 - **Anthropic 无 `response_format`**：该参数在 Anthropic 分支被忽略（结构化输出走工具）。
 - **DeepSeek 的 Anthropic 兼容**尚未实现；届时在 `anthropic` 包内对称地加 `deepseek.rs`
   + 第二层 `AnthropicVendor` 即可，结构已预留。
 
 ## 测试
 
-`tests/deepseek_integration.rs` 为联网集成测试，需设置环境变量 `API_KEY`（形如 `sk-...`）：
+离线测试覆盖全部 wire format 与流式解析，不需要 API key：
 
 ```bash
-API_KEY=sk-xxx cargo test -p model
+cargo test -p model
+```
+
+- `src` 内单元测试：`ToolChoice` / `ResponseFormat` / `percent` 序列化、请求体快照
+  （vendor 字段平铺、system 提取）、响应与流式事件映射、SSE 解析器。
+- `tests/mock_http.rs`：用本地迷你 TCP server 跑通 chat / chat_stream 全链路
+  （请求构造 → 发送 → 解析），两个协议各一组。
+
+`tests/deepseek_integration.rs` 为联网集成测试（标记 `#[ignore]`，默认不跑），
+需设置环境变量 `API_KEY`（形如 `sk-...`）：
+
+```bash
+API_KEY=sk-xxx cargo test -p model --test deepseek_integration -- --ignored
 ```

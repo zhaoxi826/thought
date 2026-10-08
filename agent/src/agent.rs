@@ -1,2 +1,3 @@
 mod thought_agent;
-mod plugin;
+
+pub use thought_agent::{Agent, AgentError};

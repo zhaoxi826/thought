@@ -18,6 +18,7 @@ fn api_key() -> String {
 }
 
 #[tokio::test]
+#[ignore = "needs network and API_KEY"]
 async fn test_anthropic_chat() {
     let anthropic_model = AnthropicModel::new(
         BASE_URL,
@@ -30,10 +31,11 @@ async fn test_anthropic_chat() {
         AnthropicMessage::new("user", "Hi"),
     ];
 
-    let reply = anthropic_model
+    let output = anthropic_model
         .chat(messages, None, None)
         .await
         .expect("chat should succeed");
-    assert!(!reply.is_empty(), "chat reply should not be empty");
-    println!("{}", reply);
+    let content = output.content.expect("chat reply should have content");
+    assert!(!content.is_empty(), "chat reply should not be empty");
+    println!("{content}");
 }
