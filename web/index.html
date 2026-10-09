@@ -4,131 +4,372 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>thought</title>
-<link rel="stylesheet" href="/css/base.css">
-<link rel="stylesheet" href="/css/layout.css">
-<link rel="stylesheet" href="/css/chat.css">
-<link rel="stylesheet" href="/css/markdown.css">
-<link rel="stylesheet" href="/css/views.css">
-<link rel="icon" href="data:,">
+<link rel="stylesheet" href="css/base.css">
+<link rel="stylesheet" href="css/home.css">
+<link rel="stylesheet" href="css/tasks.css">
+<link rel="stylesheet" href="css/settings.css">
 </head>
 <body>
 
-<!-- 登录视图 -->
-<div id="login-view" class="hidden">
-  <form id="login-form" class="login-card" autocomplete="off">
-    <div class="login-brand">thought</div>
-    <div class="login-sub">多 agent 系统</div>
-    <label class="field">
-      <span>用户名</span>
-      <input id="login-username" type="text" required autocomplete="username">
-    </label>
-    <label class="field">
-      <span>密码</span>
-      <input id="login-password" type="password" required autocomplete="current-password">
-    </label>
-    <div id="login-error" class="login-error hidden" role="alert"></div>
-    <button id="login-submit" class="btn-primary" type="submit">登 录</button>
+<!-- 登录页：进入应用前的一层（书斋风格） -->
+<div class="login" id="login" hidden>
+  <form class="login-box" id="login-form">
+    <div class="login-brand">
+      <span class="name">thought</span>
+      <span class="seal"></span>
+    </div>
+    <div class="login-sub">书 斋</div>
+    <div class="login-field"><input type="text" id="login-user" autocomplete="username" placeholder="用户名" required></div>
+    <div class="login-field"><input type="password" id="login-pass" autocomplete="current-password" placeholder="密码" required></div>
+    <div class="login-err" id="login-err"></div>
+    <button type="submit" class="login-btn" id="login-btn">进 入</button>
   </form>
 </div>
 
-<!-- 应用壳 -->
-<div id="app" class="hidden">
-  <aside id="sidebar" aria-label="侧栏">
-    <div class="side-top">
-      <div class="brand-row">
-        <span class="brand">thought</span>
-      </div>
-      <button id="btn-new-session" class="btn-primary btn-block" type="button">＋ 新会话</button>
-      <nav class="side-tabs" aria-label="视图">
-        <button class="tab active" type="button" data-view="chat" aria-current="page">会话</button>
-        <button class="tab" type="button" data-view="memory">记忆</button>
-        <button class="tab" type="button" data-view="system">系统</button>
-      </nav>
-    </div>
-    <nav id="session-list" class="session-list" aria-label="会话列表"></nav>
-    <div class="side-foot">
-      <div class="user-chip">
-        <span class="user-avatar" id="user-avatar" aria-hidden="true"></span>
-        <span id="user-name" class="user-name"></span>
-        <span id="user-role" class="role-badge"></span>
-      </div>
-      <button id="btn-logout" class="btn-ghost" type="button">退出</button>
-    </div>
-  </aside>
+<div class="app" id="app">
 
-  <main id="main">
-    <!-- 会话视图 -->
-    <section id="view-chat" class="view" aria-labelledby="chat-title">
-      <header class="topbar">
-        <button id="btn-sidebar-toggle" class="btn-ghost sidebar-toggle" type="button" title="侧栏"
-                aria-label="打开/关闭侧栏" aria-controls="sidebar" aria-expanded="false">☰</button>
-        <span id="chat-title" class="chat-title">会话</span>
-        <span id="tasks-badge" class="tasks-badge hidden" title="运行中的任务"></span>
-        <span class="spacer"></span>
-        <span class="conn" role="status">
-          <span id="conn-dot" class="conn-dot off" aria-hidden="true"></span>
-          <span class="sr-only">连接状态：</span>
-          <span id="conn-text" class="conn-text">未连接</span>
-        </span>
-      </header>
-      <!-- role=log 隐含 polite 播报；流式增量不逐字播报，定型回复走 #sr-announce -->
-      <div id="messages" class="messages" role="log" aria-label="消息" aria-live="off">
-        <div class="placeholder" id="chat-placeholder">选择左侧会话，或新建一个开始对话</div>
-      </div>
-      <div id="sr-announce" class="sr-only" aria-live="polite" aria-atomic="true"></div>
-      <div class="composer">
-        <label for="input" class="sr-only">消息内容</label>
-        <textarea id="input" rows="1" placeholder="发送消息…（Enter 发送，Shift+Enter 换行）"></textarea>
-        <button id="btn-send" class="btn-primary" type="button">发送</button>
-      </div>
-    </section>
+  <!-- 统一深色导航 rail：三个页面共用，切换时保持静止 -->
+  <nav class="rail" id="rail">
+    <span class="rail-ind" id="rail-ind"></span>
+    <div class="rail-item" data-page="home">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M21 11.5a8.5 8.5 0 0 1-8.5 8.5c-1.4 0-2.8-.3-4-.9L3 21l1.9-5.5a8.5 8.5 0 1 1 16.1-4z"/>
+      </svg>
+      对话
+    </div>
+    <div class="rail-item" data-page="tasks">
+      <span class="ping" id="tasks-ping" hidden></span>
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M9 6h11M9 12h11M9 18h11"/>
+        <path d="M4 5.5l1.2 1.2L7.5 4.5M4 11.5l1.2 1.2 2.3-2.2M4 17.5l1.2 1.2 2.3-2.2"/>
+      </svg>
+      任务
+    </div>
+    <div class="rail-item" data-page="settings">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M4 8h9M17 8h3M4 16h3M11 16h9"/>
+        <circle cx="15" cy="8" r="2"/>
+        <circle cx="9" cy="16" r="2"/>
+      </svg>
+      设置
+    </div>
+  </nav>
 
-    <!-- 记忆视图 -->
-    <section id="view-memory" class="view hidden" aria-label="记忆">
-      <header class="topbar">
-        <span class="chat-title">记忆</span>
-      </header>
-      <div class="view-body">
-        <div id="memory-disabled" class="placeholder hidden">
-          记忆未启用。在服务端配置 <code>[memory]</code> 段后可用。
+  <!-- 舞台：三个页面堆叠在同一布局里，幕帘只扫过这里 -->
+  <div class="stage" id="stage">
+
+  <!-- ================= 主页 · 对话（浅色书斋） ================= -->
+  <section class="page page-home" data-page="home">
+
+    <!-- 会话侧栏 -->
+    <aside>
+      <div class="brand">
+        <span class="name">thought</span>
+        <span class="seal"></span>
+      </div>
+
+      <div class="side-label">会话<button class="new-session" id="new-session" type="button">+ 新会话</button></div>
+      <nav class="sessions" id="sessions"></nav>
+
+      <div class="side-foot">
+        <div class="side-entry" id="memory-entry">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
+            <path d="M4 5a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V5z"/>
+            <path d="M8 8h8M8 12h8M8 16h5"/>
+          </svg>
+          记忆
+          <span class="meta" id="memory-count"></span>
+          <div class="pop" id="memory-pop">
+            <div class="pop-title" id="memory-pop-title">最近记忆</div>
+            <input class="mem-search" id="memory-search" type="text" placeholder="搜索记忆……">
+            <div id="memory-list"></div>
+          </div>
         </div>
-        <div id="memory-body">
-          <form id="memory-write" class="memory-write">
-            <label for="memory-content" class="sr-only">记忆内容</label>
-            <textarea id="memory-content" rows="2" placeholder="手动写入一条记忆…"></textarea>
-            <div class="memory-write-row">
-              <label for="memory-tags" class="sr-only">标签（逗号分隔，可空）</label>
-              <input id="memory-tags" type="text" placeholder="标签（逗号分隔，可空）">
-              <button class="btn-primary" type="submit">写入</button>
+        <div class="side-user">
+          <span class="avatar" id="user-avatar"></span>
+          <span id="user-name"></span>
+          <button class="logout" id="logout" type="button">退出</button>
+        </div>
+      </div>
+    </aside>
+
+    <!-- 主区 -->
+    <main>
+      <header>
+        <div class="conv-title" id="conv-title">thought<span class="conv-sub" id="conv-sub"></span></div>
+      </header>
+
+      <div class="scroll" id="home-scroll">
+        <div class="column" id="home-column"></div>
+      </div>
+
+      <footer>
+        <div class="composer">
+          <div class="box">
+            <textarea id="composer-input" rows="1" placeholder="继续这个话题……"></textarea>
+          </div>
+          <div class="send" id="composer-send">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#faf7f2" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M22 2 11 13M22 2l-7 20-4-9-9-4 20-7z"/>
+            </svg>
+          </div>
+        </div>
+        <div class="composer-hint">回车发送 · Shift + 回车换行</div>
+      </footer>
+    </main>
+  </section>
+
+  <!-- ================= 任务页（深色机房） ================= -->
+  <section class="page page-tasks" data-page="tasks">
+
+    <!-- 顶部系统状态带 -->
+    <div class="statusbar">
+      <span class="sb-title">任务</span>
+      <span class="sb-overview" id="sb-overview"></span>
+      <div class="sb-workers" id="sb-workers"></div>
+    </div>
+
+    <!-- 主区 -->
+    <div class="main">
+
+      <!-- 任务列表栏 -->
+      <div class="list">
+        <div class="tabs" id="task-tabs">
+          <div class="tab active" data-filter="all">全部<span class="n">0</span></div>
+          <div class="tab" data-filter="running">进行中<span class="n">0</span></div>
+          <div class="tab" data-filter="done">已完成<span class="n">0</span></div>
+          <div class="tab" data-filter="failed">失败<span class="n">0</span></div>
+        </div>
+
+        <div class="tasks" id="task-list"></div>
+
+        <div class="list-foot">
+          <span>历史任务暂存于本次会话 · 持久化待后端任务注册表</span>
+        </div>
+      </div>
+
+      <!-- 详情主区 -->
+      <div class="detail" id="task-detail">
+        <div class="detail-empty">选择左侧任务查看详情</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= 设置页（深色机房） ================= -->
+  <section class="page page-settings" data-page="settings">
+    <div class="scroll">
+      <div class="column">
+
+        <div class="page-head">
+          <div class="page-title">设置<span class="path">thought.toml</span></div>
+          <button class="save-btn" id="save-btn" disabled title="配置写回 API 待后端实现（PUT /api/config）">保存</button>
+        </div>
+        <div class="head-note">部分修改需重启后生效</div>
+
+        <div class="view-tabs">
+          <button class="view-tab active" id="tab-form" type="button">表单</button>
+          <button class="view-tab" id="tab-toml" type="button">原始 TOML</button>
+        </div>
+
+        <div id="form-view">
+
+          <!-- 服务：无数据源，骨架占位 -->
+          <section class="card">
+            <div class="card-head">
+              <span class="card-title">服务</span>
+              <span class="card-tag">[http]</span>
+              <span class="right pending-note">配置 API 待后端实现</span>
             </div>
-            <div id="memory-write-msg" class="form-msg hidden" role="status"></div>
-          </form>
-          <div class="memory-tabs" role="group" aria-label="记忆列表">
-            <button class="tab active" type="button" data-mtab="search" aria-pressed="true">搜索</button>
-            <button class="tab" type="button" data-mtab="recent" aria-pressed="false">最近</button>
-          </div>
-          <div id="memory-search-row">
-            <label for="memory-q" class="sr-only">搜索记忆</label>
-            <input id="memory-q" type="text" placeholder="搜索记忆…（回车）">
-          </div>
-          <div id="memory-list" class="memory-list"></div>
+            <div class="fields">
+              <div class="field">
+                <label>监听地址<span class="key">bind</span></label>
+                <input type="text" class="placeholder" placeholder="—" disabled>
+              </div>
+              <div class="field">
+                <label>静态前端目录<span class="key">web_dir</span></label>
+                <input type="text" class="placeholder" placeholder="—" disabled>
+                <div class="hint">相对进程工作目录，同源托管在 /</div>
+              </div>
+            </div>
+          </section>
+
+          <!-- 认证：无数据源，骨架占位 -->
+          <section class="card">
+            <div class="card-head">
+              <span class="card-title">认证</span>
+              <span class="card-tag">[auth]</span>
+              <span class="right pending-note">配置 API 待后端实现</span>
+            </div>
+            <div class="fields">
+              <div class="field">
+                <label>JWT 密钥<span class="key">jwt_secret_env</span></label>
+                <div class="env-input placeholder">
+                  <span class="env-name">—</span>
+                  <span class="lock">
+                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+                      <rect x="4" y="11" width="16" height="10" rx="2"/>
+                      <path d="M8 11V7a4 4 0 0 1 8 0v4"/>
+                    </svg>
+                  </span>
+                </div>
+                <div class="hint">至少 32 字节，如 openssl rand -hex 32</div>
+              </div>
+              <div class="field">
+                <label>令牌有效期（秒）<span class="key">token_ttl_secs</span></label>
+                <input type="text" class="placeholder" placeholder="—" disabled>
+              </div>
+              <div class="field">
+                <label>初始管理员<span class="key">bootstrap_admin.username</span></label>
+                <input type="text" class="placeholder" placeholder="—" disabled>
+                <div class="hint">首次启动且无用户时创建</div>
+              </div>
+              <div class="field">
+                <label>管理员密码<span class="key">bootstrap_admin.password_env</span></label>
+                <div class="env-input placeholder">
+                  <span class="env-name">—</span>
+                  <span class="lock">
+                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+                      <rect x="4" y="11" width="16" height="10" rx="2"/>
+                      <path d="M8 11V7a4 4 0 0 1 8 0v4"/>
+                    </svg>
+                  </span>
+                </div>
+              </div>
+            </div>
+            <div class="env-note">
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
+                <circle cx="12" cy="12" r="9"/>
+                <path d="M12 8v5M12 16h.01"/>
+              </svg>
+              密钥通过环境变量注入，不会写入配置文件或界面
+            </div>
+          </section>
+
+          <!-- 存储：无数据源，骨架占位 -->
+          <section class="card">
+            <div class="card-head">
+              <span class="card-title">存储</span>
+              <span class="card-tag">[storage]</span>
+              <span class="right pending-note">配置 API 待后端实现</span>
+            </div>
+            <div class="fields">
+              <div class="field span2">
+                <label>数据端点<span class="key">endpoint</span></label>
+                <input type="text" class="placeholder" placeholder="—" disabled>
+              </div>
+              <div class="field">
+                <label>命名空间<span class="key">namespace</span></label>
+                <input type="text" class="placeholder" placeholder="—" disabled>
+              </div>
+              <div class="field">
+                <label>数据库<span class="key">database</span></label>
+                <input type="text" class="placeholder" placeholder="—" disabled>
+              </div>
+            </div>
+          </section>
+
+          <!-- 模型池：真实数据（GET /api/models，admin） -->
+          <section class="card" id="card-models">
+            <div class="card-head">
+              <span class="card-title">模型池</span>
+              <span class="card-tag">[models.*]</span>
+              <span class="right pending-note">只读 · 写回待配置 API</span>
+            </div>
+            <div id="models-body"><div class="card-note">加载中……</div></div>
+          </section>
+
+          <!-- 记忆：无数据源，骨架占位 -->
+          <section class="card">
+            <div class="card-head">
+              <span class="card-title">记忆</span>
+              <span class="card-tag">[memory]</span>
+              <span class="right pending-note">配置 API 待后端实现</span>
+            </div>
+            <div class="fields">
+              <div class="field">
+                <label>命名空间<span class="key">namespace</span></label>
+                <input type="text" class="placeholder" placeholder="—" disabled>
+              </div>
+              <div class="field">
+                <label>数据库<span class="key">database</span></label>
+                <input type="text" class="placeholder" placeholder="—" disabled>
+              </div>
+              <div class="field">
+                <label>向量维度<span class="key">embedding_dimension</span></label>
+                <input type="text" class="placeholder" placeholder="—" disabled>
+              </div>
+              <div class="field">
+                <label>三元组抽取模型<span class="key">extractor_model</span></label>
+                <input type="text" class="placeholder" placeholder="—" disabled>
+              </div>
+              <div class="field">
+                <label>半衰期（小时）<span class="key">half_life_hours</span></label>
+                <input type="text" class="placeholder" placeholder="—" disabled>
+                <div class="hint">记忆随时间衰减，检索时按新鲜度加权</div>
+              </div>
+              <div class="field">
+                <label>&nbsp;</label>
+                <div class="switch-row">
+                  <span class="switch readonly"></span>
+                  <span class="sw-label">每用户独立记忆空间</span>
+                  <span class="sw-key">per_user</span>
+                </div>
+                <div class="switch-row mt8">
+                  <span class="switch readonly"></span>
+                  <span class="sw-label">自动写入用户消息</span>
+                  <span class="sw-key">save_user_messages</span>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <!-- Agent：真实数据（GET /api/agents） -->
+          <section class="card" id="card-agent">
+            <div class="card-head">
+              <span class="card-title">Agent</span>
+              <span class="card-tag">[agent.*]</span>
+              <span class="right pending-note">只读 · 写回待配置 API</span>
+            </div>
+            <div id="agent-body"><div class="card-note">加载中……</div></div>
+
+            <div class="card-head limits-head">
+              <span class="card-title limits-title">限额</span>
+              <span class="card-tag">[agent.limits]</span>
+              <span class="right pending-note">配置 API 待后端实现</span>
+            </div>
+            <div class="limits">
+              <div class="field">
+                <label>最大并发<span class="key">max_concurrent_tasks</span></label>
+                <input type="text" class="placeholder" placeholder="—" disabled>
+              </div>
+              <div class="field">
+                <label>子 agent 轮数<span class="key">subagent_max_turns</span></label>
+                <input type="text" class="placeholder" placeholder="—" disabled>
+              </div>
+              <div class="field">
+                <label>输出字符上限<span class="key">max_tool_output_chars</span></label>
+                <input type="text" class="placeholder" placeholder="—" disabled>
+              </div>
+            </div>
+          </section>
+
         </div>
+
+        <!-- 原始 TOML 视图 -->
+        <div class="toml-view" id="toml-view">
+          <div class="toml-pre" id="toml-pre"></div>
+        </div>
+
       </div>
-    </section>
+    </div>
+  </section>
 
-    <!-- 系统视图 -->
-    <section id="view-system" class="view hidden" aria-label="系统">
-      <header class="topbar">
-        <span class="chat-title">系统</span>
-      </header>
-      <div class="view-body" id="system-body"></div>
-    </section>
-  </main>
-</div>
+  <!-- 幕帘：只在切换时扫过内容区，不覆盖 rail -->
+  <div class="curtain" id="curtain"><span class="edge l"></span><span class="edge r"></span></div>
 
-<!-- 全局提示条 -->
-<div id="toasts" class="toasts"></div>
+  </div><!-- /stage -->
+</div><!-- /app -->
 
-<script type="module" src="/js/main.js"></script>
+<script type="module" src="js/main.js"></script>
 </body>
 </html>

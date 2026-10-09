@@ -1,0 +1,527 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>thought — 给 thought 配前端</title>
+<style>
+  :root{
+    --bg:#141210;
+    --bg-raise:#1a1714;
+    --bg-panel:#1d1a16;
+    --bg-inset:#100e0c;
+    --line:rgba(217,160,91,.14);
+    --line-soft:rgba(232,226,216,.07);
+    --text:#e8e2d8;
+    --text-dim:#a89e90;
+    --text-faint:#6f665b;
+    --amber:#d9a05b;
+    --amber-soft:rgba(217,160,91,.10);
+    --amber-line:rgba(217,160,91,.28);
+    --ok:#8fbf7f;
+    --mono:"SF Mono","Cascadia Code","JetBrains Mono",Menlo,Consolas,"Liberation Mono",monospace;
+    --sans:-apple-system,"Helvetica Neue","Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  html,body{height:100%}
+  body{
+    background:var(--bg);
+    color:var(--text);
+    font-family:var(--sans);
+    font-size:14px;
+    line-height:1.65;
+    overflow:hidden;
+    -webkit-font-smoothing:antialiased;
+  }
+  .app{display:flex;height:100vh}
+
+  /* ── 图标栏 ─────────────────────────── */
+  .rail{
+    width:56px;flex:none;
+    background:var(--bg-inset);
+    border-right:1px solid var(--line-soft);
+    display:flex;flex-direction:column;align-items:center;
+    padding:14px 0 12px;
+  }
+  .rail .mark{
+    width:30px;height:30px;border-radius:8px;
+    background:var(--amber);color:#141210;
+    font-family:var(--mono);font-weight:700;font-size:15px;
+    display:flex;align-items:center;justify-content:center;
+    margin-bottom:18px;
+  }
+  .rail-btn{
+    width:38px;height:38px;border-radius:9px;border:none;background:transparent;
+    color:var(--text-faint);cursor:pointer;
+    display:flex;align-items:center;justify-content:center;
+    margin-bottom:6px;position:relative;
+    transition:color .15s,background .15s;
+  }
+  .rail-btn svg{width:18px;height:18px}
+  .rail-btn:hover{color:var(--text-dim);background:rgba(232,226,216,.05)}
+  .rail-btn.active{color:var(--amber);background:var(--amber-soft)}
+  .rail .spacer{flex:1}
+
+  /* ── 会话列 ─────────────────────────── */
+  .sessions{
+    width:236px;flex:none;
+    background:var(--bg-raise);
+    border-right:1px solid var(--line-soft);
+    display:flex;flex-direction:column;
+  }
+  .sessions-head{
+    padding:16px 18px 12px;
+    display:flex;align-items:baseline;justify-content:space-between;
+  }
+  .sessions-head h1{
+    font-family:var(--mono);font-size:11px;font-weight:600;
+    letter-spacing:.18em;color:var(--text-faint);text-transform:uppercase;
+  }
+  .new-btn{
+    border:1px solid var(--amber-line);background:transparent;color:var(--amber);
+    font-family:var(--mono);font-size:11px;padding:3px 9px;border-radius:6px;cursor:pointer;
+  }
+  .new-btn:hover{background:var(--amber-soft)}
+  .session-list{flex:1;overflow-y:auto;padding:2px 10px 10px}
+  .session{
+    padding:9px 10px;border-radius:8px;cursor:pointer;
+    border-left:2px solid transparent;margin-bottom:2px;
+  }
+  .session:hover{background:rgba(232,226,216,.04)}
+  .session .t{font-size:13px;color:var(--text-dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .session .m{font-family:var(--mono);font-size:10.5px;color:var(--text-faint);margin-top:2px}
+  .session.current{
+    background:var(--amber-soft);border-left-color:var(--amber);
+  }
+  .session.current .t{color:var(--text)}
+  .session.current .m{color:var(--amber)}
+  .sessions-foot{
+    border-top:1px solid var(--line-soft);
+    padding:12px 18px;
+    font-family:var(--mono);font-size:10.5px;color:var(--text-faint);line-height:1.9;
+  }
+  .sessions-foot b{color:var(--text-dim);font-weight:500}
+  .dot-ok{display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--ok);margin-right:6px;vertical-align:1px}
+
+  /* ── 主区 ─────────────────────────── */
+  .main{flex:1;display:flex;flex-direction:column;min-width:0}
+  .thread-head{
+    flex:none;height:48px;
+    display:flex;align-items:center;gap:14px;
+    padding:0 28px;
+    border-bottom:1px solid var(--line-soft);
+    background:var(--bg);
+  }
+  .thread-head .title{font-size:14.5px;font-weight:600}
+  .thread-head .sep{color:var(--text-faint)}
+  .thread-head .meta{font-family:var(--mono);font-size:11px;color:var(--text-faint)}
+  .thread-head .meta em{font-style:normal;color:var(--amber)}
+  .thread-head .right{margin-left:auto;font-family:var(--mono);font-size:11px;color:var(--text-faint)}
+
+  .thread{flex:1;overflow-y:auto;padding:8px 0 24px}
+
+  .date-sep{
+    display:flex;align-items:center;gap:14px;
+    padding:14px 28px 3px;
+    font-family:var(--mono);font-size:10.5px;letter-spacing:.16em;
+    color:var(--text-faint);text-transform:uppercase;
+  }
+  .date-sep::before,.date-sep::after{content:"";height:1px;background:var(--line-soft)}
+  .date-sep::before{width:28px}
+  .date-sep::after{flex:1}
+
+  /* journal 条目 */
+  .entry{padding:10px 28px 2px;display:flex;gap:18px}
+  .entry .gutter{
+    flex:none;width:88px;padding-top:2px;text-align:right;
+    font-family:var(--mono);font-size:10.5px;color:var(--text-faint);line-height:1.7;
+  }
+  .entry .gutter .who{display:block;font-size:11px;letter-spacing:.1em;text-transform:uppercase}
+  .entry .gutter .who.user{color:var(--text-dim)}
+  .entry .gutter .who.bot{color:var(--amber)}
+  .entry .body{flex:1;min-width:0;max-width:860px}
+  .entry.user-e .body .text{color:var(--text)}
+  .entry .text{font-size:14px}
+
+  /* agent 活动 chip 流 */
+  .activity{padding:5px 28px 3px 134px}
+  .act-label{
+    font-family:var(--mono);font-size:10px;letter-spacing:.18em;
+    color:var(--text-faint);text-transform:uppercase;
+    margin-bottom:6px;display:flex;align-items:center;gap:8px;
+  }
+  .act-label .rule{width:22px;height:1px;background:var(--amber-line)}
+  .chips{
+    display:flex;flex-wrap:wrap;align-items:center;gap:0;
+    cursor:pointer;max-width:860px;
+    border:1px solid var(--line-soft);border-radius:9px;
+    background:var(--bg-panel);
+    padding:8px 12px;
+  }
+  .chips:hover{border-color:var(--line)}
+  .chip{
+    display:inline-flex;align-items:center;gap:5px;
+    font-family:var(--mono);font-size:11.5px;
+    color:var(--text-dim);
+    padding:2.5px 8px;border-radius:5px;
+    white-space:nowrap;
+  }
+  .chip:hover{background:rgba(232,226,216,.06);color:var(--text)}
+  .chip .k{color:var(--amber)}
+  .chip.tool{color:#c9b48f}
+  .chip.ok{color:var(--ok)}
+  .chip.sum{color:var(--text-faint)}
+  .chip .caret{color:var(--text-faint);font-size:9px;margin-left:2px}
+  .chip-sep{color:var(--text-faint);font-family:var(--mono);font-size:10px;margin:0 1px;user-select:none}
+
+  .act-detail{
+    max-width:860px;display:none;
+    border:1px solid var(--line-soft);border-top:none;
+    border-radius:0 0 9px 9px;
+    background:var(--bg-inset);
+    margin-top:-9px;padding:20px 18px 14px;
+  }
+  .activity.open .act-detail{display:block}
+  .act-detail .task{
+    border-left:2px solid var(--amber-line);
+    padding:2px 0 2px 14px;margin-bottom:14px;
+  }
+  .act-detail .task:last-child{margin-bottom:0}
+  .act-detail .tt{font-size:13px;color:var(--text);font-weight:600}
+  .act-detail .tm{
+    font-family:var(--mono);font-size:10.5px;color:var(--text-faint);margin:3px 0 8px;
+  }
+  .act-detail .tm em{font-style:normal;color:var(--amber)}
+  .act-detail ul{list-style:none}
+  .act-detail li{
+    font-family:var(--mono);font-size:11.5px;color:var(--text-dim);
+    padding:2.5px 0;display:flex;gap:8px;align-items:baseline;
+  }
+  .act-detail li .n{color:var(--text-faint);flex:none;width:14px;text-align:right}
+  .act-detail li .st{margin-left:auto;color:var(--text-faint);font-size:10.5px;flex:none}
+  .act-detail li .st.ok{color:var(--ok)}
+
+  /* 助手回复 */
+  .reply p{margin-bottom:9px;max-width:720px}
+  .reply strong{color:var(--amber);font-weight:600}
+  .codeblock{
+    margin:11px 0;max-width:720px;
+    border:1px solid var(--line-soft);border-radius:9px;overflow:hidden;
+    background:var(--bg-inset);
+  }
+  .codeblock .cb-head{
+    display:flex;align-items:center;justify-content:space-between;
+    padding:7px 14px;border-bottom:1px solid var(--line-soft);
+    font-family:var(--mono);font-size:10.5px;color:var(--text-faint);
+  }
+  .codeblock .cb-head .lang{color:var(--amber)}
+  .codeblock pre{
+    padding:11px 16px;overflow-x:auto;
+    font-family:var(--mono);font-size:12px;line-height:1.65;color:var(--text-dim);
+  }
+  .codeblock .ln{color:var(--text-faint);user-select:none;display:inline-block;width:20px;margin-right:14px;text-align:right}
+  .codeblock .kw{color:var(--amber)}
+  .codeblock .cm{color:var(--text-faint);font-style:italic}
+  .codeblock .fn{color:#e0c084}
+  .suggest{
+    margin-top:11px;max-width:720px;
+    border-left:2px solid var(--amber);
+    background:var(--amber-soft);
+    border-radius:0 8px 8px 0;
+    padding:8px 14px;font-size:13px;color:var(--text-dim);
+  }
+  .suggest .tag{
+    font-family:var(--mono);font-size:10px;letter-spacing:.16em;color:var(--amber);
+    text-transform:uppercase;display:block;margin-bottom:3px;
+  }
+
+  /* spinner */
+  .spinner{
+    width:11px;height:11px;flex:none;
+    border:1.5px solid rgba(217,160,91,.25);
+    border-top-color:var(--amber);
+    border-radius:50%;
+    animation:spin 1s linear infinite;
+  }
+  @keyframes spin{to{transform:rotate(360deg)}}
+  .chip.running{color:var(--amber)}
+  .pulse{animation:pulse 1.6s ease-in-out infinite}
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
+
+  /* 输入框 */
+  .composer{
+    flex:none;border-top:1px solid var(--line-soft);
+    padding:10px 28px 12px;background:var(--bg);
+  }
+  .composer-inner{
+    max-width:860px;margin-left:106px;
+    display:flex;align-items:flex-end;gap:10px;
+    border:1px solid var(--line);border-radius:10px;
+    background:var(--bg-panel);padding:10px 10px 10px 16px;
+  }
+  .composer-inner:focus-within{border-color:var(--amber-line);box-shadow:0 0 0 3px rgba(217,160,91,.07)}
+  .composer textarea{
+    flex:1;background:transparent;border:none;outline:none;resize:none;
+    color:var(--text);font-family:var(--sans);font-size:14px;line-height:1.6;
+    height:22px;
+  }
+  .composer textarea::placeholder{color:var(--text-faint)}
+  .send-btn{
+    flex:none;border:none;background:var(--amber);color:#141210;
+    font-family:var(--mono);font-size:11.5px;font-weight:700;
+    padding:7px 16px;border-radius:7px;cursor:pointer;letter-spacing:.06em;
+  }
+  .send-btn:hover{background:#e5b274}
+  .composer-hint{
+    max-width:860px;margin:6px 0 0 106px;
+    font-family:var(--mono);font-size:10px;color:var(--text-faint);
+  }
+  .composer-hint em{font-style:normal;color:var(--text-dim)}
+
+  /* ── 记忆面板 ─────────────────────────── */
+  .memory{
+    width:264px;flex:none;
+    background:var(--bg-raise);
+    border-left:1px solid var(--line-soft);
+    display:flex;flex-direction:column;
+  }
+  .memory-head{
+    padding:16px 18px 12px;
+    display:flex;align-items:baseline;justify-content:space-between;
+    border-bottom:1px solid var(--line-soft);
+  }
+  .memory-head h2{
+    font-family:var(--mono);font-size:11px;font-weight:600;
+    letter-spacing:.18em;color:var(--text-faint);text-transform:uppercase;
+  }
+  .memory-head .cnt{font-family:var(--mono);font-size:10.5px;color:var(--amber)}
+  .memory-body{flex:1;overflow-y:auto;padding:14px 14px;display:flex;flex-direction:column;gap:10px}
+  .mem-card{
+    border:1px solid var(--line-soft);border-radius:9px;
+    background:var(--bg-panel);padding:12px 13px;cursor:pointer;
+    transition:border-color .15s;
+  }
+  .mem-card:hover{border-color:var(--amber-line)}
+  .mem-card .top{display:flex;align-items:center;justify-content:space-between;margin-bottom:6px}
+  .mem-card .kind{
+    font-family:var(--mono);font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;
+    color:var(--amber);border:1px solid var(--amber-line);border-radius:4px;padding:1.5px 6px;
+  }
+  .mem-card .score{font-family:var(--mono);font-size:10px;color:var(--text-faint)}
+  .mem-card .score em{font-style:normal;color:var(--amber)}
+  .mem-card .txt{font-size:12.5px;line-height:1.6;color:var(--text-dim)}
+  .mem-card .src{font-family:var(--mono);font-size:10px;color:var(--text-faint);margin-top:7px}
+  .memory-foot{
+    border-top:1px solid var(--line-soft);padding:10px 18px;
+    font-family:var(--mono);font-size:10px;color:var(--text-faint);
+  }
+
+  ::-webkit-scrollbar{width:8px;height:8px}
+  ::-webkit-scrollbar-thumb{background:rgba(232,226,216,.12);border-radius:4px}
+  ::-webkit-scrollbar-track{background:transparent}
+</style>
+</head>
+<body>
+<div class="app">
+
+  <!-- 图标栏 -->
+  <nav class="rail">
+    <div class="mark">t</div>
+    <button class="rail-btn active" title="会话">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12c0 4.4-4 8-9 8-1.2 0-2.4-.2-3.4-.6L3 21l1.7-4.1C3.6 15.5 3 13.8 3 12c0-4.4 4-8 9-8s9 3.6 9 8z"/></svg>
+    </button>
+    <button class="rail-btn" title="记忆" id="memToggle">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l8 4.5v9L12 21l-8-4.5v-9L12 3z"/><path d="M12 12l8-4.5M12 12v9M12 12L4 7.5"/></svg>
+    </button>
+    <div class="spacer"></div>
+    <button class="rail-btn" title="Agents">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="5" r="2.4"/><circle cx="5" cy="18" r="2.4"/><circle cx="19" cy="18" r="2.4"/><path d="M10.8 7l-4.4 8.7M13.2 7l4.4 8.7M7.4 18h9.2"/></svg>
+    </button>
+    <button class="rail-btn" title="设置">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 0 0-.14-1.4l2.1-1.6-2-3.4-2.4 1a7 7 0 0 0-2.4-1.4L13.7 2h-3.4l-.42 2.6a7 7 0 0 0-2.4 1.4l-2.4-1-2 3.4 2.1 1.6A7 7 0 0 0 5 12c0 .48.05.94.14 1.4l-2.1 1.6 2 3.4 2.4-1a7 7 0 0 0 2.4 1.4l.42 2.6h3.4l.42-2.6a7 7 0 0 0 2.4-1.4l2.4 1 2-3.4-2.1-1.6c.09-.46.14-.92.14-1.4z"/></svg>
+    </button>
+  </nav>
+
+  <!-- 会话列 -->
+  <aside class="sessions">
+    <div class="sessions-head">
+      <h1>会话</h1>
+      <button class="new-btn">+ 新会话</button>
+    </div>
+    <div class="session-list">
+      <div class="session current">
+        <div class="t">给 thought 配前端</div>
+        <div class="m">进行中 · coder#5 · 刚刚</div>
+      </div>
+      <div class="session">
+        <div class="t">重构记忆检索</div>
+        <div class="m">昨天 · 12 条消息</div>
+      </div>
+      <div class="session">
+        <div class="t">周报草稿</div>
+        <div class="m">周二 · 4 条消息</div>
+      </div>
+      <div class="session">
+        <div class="t">Rust async 讨论</div>
+        <div class="m">10/03 · 21 条消息</div>
+      </div>
+      <div class="session">
+        <div class="t">部署到 VPS</div>
+        <div class="m">09/28 · 9 条消息</div>
+      </div>
+    </div>
+    <div class="sessions-foot">
+      <span class="dot-ok"></span><b>controller</b> · deepseek<br>
+      <span style="display:inline-block;width:12px"></span>workers: <b>coder</b>, <b>researcher</b>
+    </div>
+  </aside>
+
+  <!-- 主区 -->
+  <main class="main">
+    <header class="thread-head">
+      <span class="title">给 thought 配前端</span>
+      <span class="sep">·</span>
+      <span class="meta">controller <em>deepseek</em> / coder <em>deepseek</em> / researcher <em>deepseek-flash</em></span>
+      <span class="right">会话 #12</span>
+    </header>
+
+    <div class="thread">
+      <div class="date-sep">2026 年 10 月 8 日 · 星期四</div>
+
+      <!-- 用户 1 -->
+      <div class="entry user-e">
+        <div class="gutter"><span class="who user">你</span>14:02</div>
+        <div class="body">
+          <div class="text">帮我看一下 symbol 里的三路融合检索，融合后的截断逻辑是不是有问题？感觉相关的结果被砍掉了</div>
+        </div>
+      </div>
+
+      <!-- 已完成的 agent 活动 -->
+      <div class="activity" id="act1">
+        <div class="act-label"><span class="rule"></span>Agent 活动 · 一轮 · 已完成</div>
+        <div class="chips" onclick="toggleAct('act1')">
+          <span class="chip"><span class="k">▸</span> 思考</span><span class="chip-sep">▸</span>
+          <span class="chip">派单 <span class="k">coder</span></span><span class="chip-sep">▸</span>
+          <span class="chip tool">read_file fusion.rs</span><span class="chip-sep">▸</span>
+          <span class="chip tool">检索记忆 ×2</span><span class="chip-sep">▸</span>
+          <span class="chip tool">run_command cargo test</span><span class="chip-sep">▸</span>
+          <span class="chip ok">✓ 通过</span><span class="chip-sep">▸</span>
+          <span class="chip">子 agent <span class="k">sub1</span></span><span class="chip-sep">▸</span>
+          <span class="chip sum">47s · 4,213 tok <span class="caret">▾</span></span>
+        </div>
+        <div class="act-detail">
+          <div class="task">
+            <div class="tt">主控思考</div>
+            <div class="tm">controller · deepseek · <em>3s</em></div>
+            <ul>
+              <li><span class="n">1</span>用户在问融合后的截断逻辑，怀疑相关结果被误砍<span class="st">意图确认</span></li>
+              <li><span class="n">2</span>需要查看 symbol 的融合代码 → 派单 coder<span class="st">路由</span></li>
+            </ul>
+          </div>
+          <div class="task">
+            <div class="tt">分析检索融合与截断逻辑</div>
+            <div class="tm">coder · deepseek · <em>47s</em> · 4,213 tokens · 已完成</div>
+            <ul>
+              <li><span class="n">1</span>read_file symbol/src/fusion.rs<span class="st ok">ok</span></li>
+              <li><span class="n">2</span>检索记忆「融合截断 relative_cutoff」<span class="st ok">命中 2 条</span></li>
+              <li><span class="n">3</span>run_command cargo test -p symbol fusion<span class="st ok">通过</span></li>
+              <li><span class="n">4</span>子 agent sub1 核对 relative_cutoff 的历史变更<span class="st">参与</span></li>
+            </ul>
+          </div>
+        </div>
+      </div>
+
+      <!-- 助手回复（主角） -->
+      <div class="entry">
+        <div class="gutter"><span class="who bot">thought</span>14:03</div>
+        <div class="body reply">
+          <p>确实有问题。<code style="font-family:var(--mono);font-size:12.5px;color:var(--amber)">fusion.rs</code> 里截断阈值是 <strong>max(min_score, 首条 × relative_cutoff)</strong>，当首条分数异常高时（比如精确命中了标题），relative_cutoff 会把语义相近但分数不到一半的结果全部砍掉。</p>
+          <p>示意修复——首条为离群值时，退回用中位数做基准：</p>
+          <div class="codeblock">
+            <div class="cb-head"><span>symbol/src/fusion.rs</span><span class="lang">rust</span></div>
+            <pre><span class="ln">1</span><span class="kw">let</span> baseline = <span class="kw">if</span> <span class="fn">is_outlier</span>(scores[0], &scores[1..]) {
+<span class="ln">2</span>    <span class="cm">// 首条是离群值：改用中位数基准</span>
+<span class="ln">3</span>    <span class="fn">median</span>(&scores)
+<span class="ln">4</span>} <span class="kw">else</span> {
+<span class="ln">5</span>    scores[0]
+<span class="ln">6</span>};
+<span class="ln">7</span><span class="kw">let</span> cutoff = min_score.<span class="fn">max</span>(baseline * <span class="kw">self</span>.relative_cutoff);
+<span class="ln">8</span>hits.<span class="fn">retain</span>(|h| h.score >= cutoff);</pre>
+          </div>
+          <div class="suggest">
+            <span class="tag">建议</span>
+            离群判定可以用「首条 > 中位数 × 2」这种简单规则；另外建议给 relative_cutoff 配一个绝对下限，避免基准本身过低时误保留噪声。
+          </div>
+        </div>
+      </div>
+
+      <!-- 用户 2 -->
+      <div class="entry user-e">
+        <div class="gutter"><span class="who user">你</span>14:05</div>
+        <div class="body">
+          <div class="text">改成首条为异常值时用中位数做基准？去改吧</div>
+        </div>
+      </div>
+
+      <!-- 进行中的 agent 活动 -->
+      <div class="activity">
+        <div class="act-label"><span class="rule"></span>Agent 活动 · 进行中</div>
+        <div class="chips">
+          <span class="chip"><span class="k">▸</span> 思考</span><span class="chip-sep">▸</span>
+          <span class="chip">派单 <span class="k">coder#5</span></span><span class="chip-sep">▸</span>
+          <span class="chip tool">edit_file fusion.rs</span><span class="chip-sep">▸</span>
+          <span class="chip tool running">run_command cargo test <span class="pulse">…</span></span><span class="chip-sep">▸</span>
+          <span class="chip sum"><span class="spinner"></span> 12s · 进行中</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- 输入框 -->
+    <div class="composer">
+      <div class="composer-inner">
+        <textarea placeholder="给 thought 发消息…"></textarea>
+        <button class="send-btn">发送 ⏎</button>
+      </div>
+      <div class="composer-hint">Enter 发送 · Shift+Enter 换行 · <em>coder#5 执行中，消息将排队</em></div>
+    </div>
+  </main>
+
+  <!-- 记忆面板 -->
+  <aside class="memory" id="memPanel">
+    <div class="memory-head">
+      <h2>记忆</h2>
+      <span class="cnt">3 条相关</span>
+    </div>
+    <div class="memory-body">
+      <div class="mem-card">
+        <div class="top"><span class="kind">偏好</span><span class="score">score <em>0.83</em></span></div>
+        <div class="txt">用户偏好：解释要引用文件行号</div>
+        <div class="src">source: 历史会话 · 09/30</div>
+      </div>
+      <div class="mem-card">
+        <div class="top"><span class="kind">事实</span><span class="score">score <em>0.91</em></span></div>
+        <div class="txt">fusion.rs 的 relative_cutoff = 0.5</div>
+        <div class="src">source: symbol/src/fusion.rs</div>
+      </div>
+      <div class="mem-card">
+        <div class="top"><span class="kind">架构</span><span class="score">score <em>0.88</em></span></div>
+        <div class="txt">检索融合三路：semantic / sparse / graph</div>
+        <div class="src">source: 会话「重构记忆检索」</div>
+      </div>
+    </div>
+    <div class="memory-foot">持久化记忆 · 按相关度排序</div>
+  </aside>
+
+</div>
+
+<script>
+  function toggleAct(id){
+    document.getElementById(id).classList.toggle('open');
+  }
+  // 已完成的活动默认折叠（打开状态仅为演示时加 .open）
+  document.getElementById('memToggle').addEventListener('click', function(){
+    var p = document.getElementById('memPanel');
+    p.style.display = (p.style.display === 'none') ? 'flex' : 'none';
+  });
+</script>
+</body>
+</html>

@@ -1,0 +1,555 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>thought · 给 thought 配前端</title>
+<style>
+  :root {
+    --paper: #faf7f2;
+    --paper-deep: #f4efe7;
+    --ink: #1a1a18;
+    --ink-soft: #55524b;
+    --ink-faint: #8a857b;
+    --hairline: #e5e0d8;
+    --hairline-strong: #d8d1c5;
+    --accent: #c2473a;
+    --accent-soft: rgba(194, 71, 58, 0.08);
+    --code-bg: #f1ece3;
+    --serif: Georgia, "Songti SC", "Noto Serif CJK SC", "SimSun", serif;
+    --sans: -apple-system, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Segoe UI", sans-serif;
+    --mono: "SF Mono", Menlo, Consolas, "Courier New", monospace;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  html, body {
+    height: 100%;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 14.5px;
+    line-height: 1.65;
+    overflow: hidden;
+  }
+
+  /* ---------- 布局骨架：导航 rail + 会话侧栏 + 主区 ---------- */
+  .app {
+    display: grid;
+    grid-template-columns: 56px 264px 1fr;
+    height: 100vh;
+  }
+
+  /* ---------- 最左：竖向导航 rail ---------- */
+  .rail {
+    border-right: 1px solid var(--hairline);
+    background: var(--paper);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 20px 0 16px;
+    gap: 4px;
+  }
+  .rail-item {
+    width: 44px;
+    padding: 9px 0 7px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 5px;
+    border-radius: 8px;
+    cursor: pointer;
+    color: var(--ink-faint);
+    position: relative;
+  }
+  .rail-item:hover { background: var(--paper-deep); color: var(--ink-soft); }
+  .rail-item .lbl {
+    font-size: 10px;
+    letter-spacing: 0.12em;
+  }
+  .rail-item.active { color: var(--ink); background: var(--paper-deep); }
+  .rail-item.active::before {
+    content: "";
+    position: absolute;
+    left: -7px; top: 10px; bottom: 10px;
+    width: 2px;
+    background: var(--accent);
+    border-radius: 1px;
+  }
+  /* 任务进行中：朱红小圆点 */
+  .rail-item .dot {
+    position: absolute;
+    top: 7px; right: 9px;
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: var(--accent);
+    animation: breathe 2.2s ease-in-out infinite;
+  }
+  @keyframes breathe {
+    0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(194, 71, 58, 0.35); }
+    50% { opacity: 0.55; box-shadow: 0 0 0 4px rgba(194, 71, 58, 0); }
+  }
+  .rail-foot { margin-top: auto; }
+
+  /* ---------- 会话侧栏 ---------- */
+  aside {
+    border-right: 1px solid var(--hairline);
+    background: var(--paper);
+    display: flex;
+    flex-direction: column;
+    padding: 26px 0 0;
+  }
+
+  .brand {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    padding: 0 28px 24px;
+    border-bottom: 1px solid var(--hairline);
+  }
+  .brand .name {
+    font-family: var(--serif);
+    font-size: 22px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+  }
+  .brand .seal {
+    width: 8px; height: 8px;
+    background: var(--accent);
+    border-radius: 50%;
+    transform: translateY(-1px);
+  }
+
+  .side-label {
+    font-size: 10.5px;
+    letter-spacing: 0.22em;
+    color: var(--ink-faint);
+    padding: 20px 28px 8px;
+    text-transform: uppercase;
+  }
+
+  .sessions { flex: 1; overflow-y: auto; padding: 0 14px; }
+
+  .session {
+    padding: 10px 14px;
+    border-radius: 6px;
+    cursor: pointer;
+    position: relative;
+    margin-bottom: 2px;
+  }
+  .session .t {
+    font-size: 13.5px;
+    color: var(--ink-soft);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .session.active { background: var(--paper-deep); }
+  .session.active .t { color: var(--ink); font-weight: 500; }
+  .session.active::before {
+    content: "";
+    position: absolute;
+    left: 0; top: 11px; bottom: 11px;
+    width: 2px;
+    background: var(--accent);
+    border-radius: 1px;
+  }
+  .session:not(.active):hover { background: rgba(244, 239, 231, 0.55); }
+
+  /* 侧栏底部入口 */
+  .side-foot {
+    border-top: 1px solid var(--hairline);
+    padding: 12px 14px 16px;
+  }
+  .side-entry {
+    display: flex;
+    align-items: center;
+    gap: 11px;
+    padding: 8px 14px;
+    border-radius: 6px;
+    cursor: pointer;
+    color: var(--ink-soft);
+    font-size: 13px;
+    position: relative;
+  }
+  .side-entry:hover { background: var(--paper-deep); color: var(--ink); }
+  .side-entry svg { flex: none; opacity: 0.75; }
+  .side-entry .meta {
+    margin-left: auto;
+    font-size: 11px;
+    color: var(--ink-faint);
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* 悬浮卡片：记忆样例 */
+  .pop {
+    display: none;
+    position: absolute;
+    left: 0; right: auto; bottom: calc(100% + 6px);
+    width: max-content;
+    max-width: 300px;
+    background: #fffdf9;
+    border: 1px solid var(--hairline-strong);
+    border-radius: 10px;
+    padding: 12px 16px 10px;
+    box-shadow: 0 10px 30px rgba(26, 26, 24, 0.10);
+    z-index: 30;
+    cursor: default;
+  }
+  .side-entry:hover .pop { display: block; }
+  .pop .pop-title {
+    font-size: 10px;
+    letter-spacing: 0.22em;
+    color: var(--ink-faint);
+    margin-bottom: 8px;
+  }
+  .pop .mem {
+    font-size: 12px;
+    color: var(--ink-soft);
+    padding: 6px 0;
+    border-bottom: 1px dashed var(--hairline);
+    display: flex;
+    align-items: baseline;
+    gap: 14px;
+  }
+  .pop .mem:last-child { border-bottom: none; }
+  .pop .mem .txt { flex: 1; }
+  .pop .mem .score {
+    font-family: var(--mono);
+    font-size: 10.5px;
+    color: var(--accent);
+    flex: none;
+  }
+
+  /* ---------- 主区 ---------- */
+  main {
+    display: flex;
+    flex-direction: column;
+    position: relative;
+    overflow: hidden;
+  }
+
+  /* 顶栏：会话题 */
+  header {
+    padding: 14px 0 0;
+    text-align: center;
+    position: relative;
+  }
+  .conv-title {
+    font-family: var(--serif);
+    font-size: 18px;
+    font-weight: 600;
+    letter-spacing: 0.01em;
+  }
+  .conv-sub {
+    font-family: var(--sans);
+    margin-left: 14px;
+    font-size: 11px;
+    font-weight: 400;
+    color: var(--ink-faint);
+    letter-spacing: 0.06em;
+  }
+
+  /* 对话卷轴 */
+  .scroll {
+    flex: 1;
+    overflow-y: auto;
+    padding: 10px 0 12px;
+  }
+  .column {
+    max-width: 720px;
+    margin: 0 auto;
+    padding: 0 28px;
+  }
+
+  /* 消息：信件感 */
+  .letter { margin-bottom: 20px; }
+  .letter-head {
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+    margin-bottom: 6px;
+  }
+  .letter-head .who {
+    font-family: var(--serif);
+    font-size: 14.5px;
+    font-weight: 600;
+  }
+  .letter-head .when {
+    font-size: 11px;
+    color: var(--ink-faint);
+    letter-spacing: 0.05em;
+  }
+  .letter.user .who { color: var(--ink-soft); }
+  .letter.user .body {
+    color: var(--ink-soft);
+    font-size: 14.5px;
+  }
+
+  .letter.assistant .body { font-size: 14.5px; }
+  .letter.assistant .body p { margin-bottom: 8px; }
+  .letter.assistant .body p:last-child { margin-bottom: 0; }
+
+  /* 代码块：信纸上的一小块稿纸 */
+  .code {
+    background: var(--code-bg);
+    border: 1px solid var(--hairline);
+    border-radius: 8px;
+    padding: 11px 18px;
+    margin: 10px 0 12px;
+    font-family: var(--mono);
+    font-size: 12.5px;
+    line-height: 1.55;
+    overflow-x: auto;
+    white-space: pre;
+    color: #33302a;
+  }
+  .code .cm { color: #98917f; font-style: italic; }
+  .code .kw { color: #7a4a8c; }
+  .code-caption {
+    font-size: 11px;
+    color: var(--ink-faint);
+    letter-spacing: 0.1em;
+    margin-bottom: 6px;
+    font-family: var(--mono);
+  }
+
+  .suggestion {
+    border-left: 2px solid var(--accent);
+    background: var(--accent-soft);
+    padding: 9px 16px;
+    border-radius: 0 6px 6px 0;
+    font-size: 13.5px;
+    margin-top: 2px;
+  }
+  .suggestion .tag {
+    font-size: 10.5px;
+    letter-spacing: 0.22em;
+    color: var(--accent);
+    display: block;
+    margin-bottom: 2px;
+  }
+
+  /* 外包交接：唯一的一行 muted 小字 */
+  .handoff {
+    font-size: 12px;
+    color: var(--ink-faint);
+    letter-spacing: 0.02em;
+    margin: 2px 0 0;
+  }
+  .handoff a {
+    color: var(--ink-soft);
+    text-decoration: none;
+    border-bottom: 1px solid var(--hairline-strong);
+    padding-bottom: 1px;
+    cursor: pointer;
+  }
+  .handoff a:hover { color: var(--accent); border-bottom-color: var(--accent); }
+
+  /* ---------- 底部输入框 ---------- */
+  footer {
+    border-top: 1px solid var(--hairline);
+    padding: 10px 0 10px;
+    background: var(--paper);
+  }
+  .composer {
+    max-width: 720px;
+    margin: 0 auto;
+    padding: 0 28px;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+  }
+  .composer .box {
+    flex: 1;
+    border: 1px solid var(--hairline-strong);
+    border-radius: 22px;
+    background: #fffdf9;
+    padding: 9px 20px;
+    display: flex;
+    align-items: center;
+  }
+  .composer input {
+    border: none;
+    outline: none;
+    background: transparent;
+    font-size: 14px;
+    font-family: var(--sans);
+    color: var(--ink);
+    width: 100%;
+  }
+  .composer input::placeholder { color: var(--ink-faint); }
+  .send {
+    width: 34px; height: 34px;
+    border-radius: 50%;
+    background: var(--ink);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    flex: none;
+  }
+  .send:hover { background: var(--accent); }
+  .composer-hint {
+    max-width: 720px;
+    margin: 4px auto 0;
+    padding: 0 34px;
+    font-size: 10px;
+    color: var(--ink-faint);
+    letter-spacing: 0.05em;
+    text-align: center;
+  }
+
+  ::selection { background: rgba(194, 71, 58, 0.15); }
+  .scroll::-webkit-scrollbar, .sessions::-webkit-scrollbar { width: 5px; }
+  .scroll::-webkit-scrollbar-thumb, .sessions::-webkit-scrollbar-thumb {
+    background: var(--hairline-strong); border-radius: 3px;
+  }
+</style>
+</head>
+<body>
+<div class="app">
+
+  <!-- 导航 rail -->
+  <nav class="rail">
+    <div class="rail-item active">
+      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M21 12a8 8 0 0 1-8 8H4l2.2-2.9A8 8 0 1 1 21 12z"/>
+      </svg>
+      <span class="lbl">对话</span>
+    </div>
+    <div class="rail-item">
+      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M9 6h11M9 12h11M9 18h11"/>
+        <path d="M4 5.5 5 7l1.5-2M4 11.5 5 13l1.5-2M4 17.5 5 19l1.5-2"/>
+      </svg>
+      <span class="lbl">任务</span>
+      <span class="dot"></span>
+    </div>
+    <div class="rail-item rail-foot">
+      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="3.2"/>
+        <path d="M12 2.8v2.6M12 18.6v2.6M2.8 12h2.6M18.6 12h2.6M5.5 5.5l1.8 1.8M16.7 16.7l1.8 1.8M18.5 5.5l-1.8 1.8M7.3 16.7l-1.8 1.8"/>
+      </svg>
+      <span class="lbl">设置</span>
+    </div>
+  </nav>
+
+  <!-- 会话侧栏 -->
+  <aside>
+    <div class="brand">
+      <span class="name">thought</span>
+      <span class="seal"></span>
+    </div>
+
+    <div class="side-label">会话</div>
+    <nav class="sessions">
+      <div class="session active"><div class="t">给 thought 配前端</div></div>
+      <div class="session"><div class="t">重构记忆检索</div></div>
+      <div class="session"><div class="t">周报草稿</div></div>
+      <div class="session"><div class="t">Rust async 讨论</div></div>
+      <div class="session"><div class="t">部署到 VPS</div></div>
+    </nav>
+
+    <div class="side-foot">
+      <div class="side-entry">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
+          <path d="M4 5a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V5z"/>
+          <path d="M8 8h8M8 12h8M8 16h5"/>
+        </svg>
+        记忆
+        <span class="meta">128 条</span>
+        <div class="pop">
+          <div class="pop-title">最近记忆</div>
+          <div class="mem"><span class="txt">用户偏好：解释要引用文件行号</span><span class="score">0.83</span></div>
+          <div class="mem"><span class="txt">fusion.rs 的 relative_cutoff = 0.5</span><span class="score">0.77</span></div>
+          <div class="mem"><span class="txt">检索融合三路：semantic / sparse / graph</span><span class="score">0.71</span></div>
+        </div>
+      </div>
+    </div>
+  </aside>
+
+  <!-- 主区 -->
+  <main>
+    <header>
+      <div class="conv-title">给 thought 配前端<span class="conv-sub">主控 controller · deepseek</span></div>
+    </header>
+
+    <div class="scroll" id="scroll">
+      <div class="column">
+
+        <!-- 1. 用户来信 -->
+        <section class="letter user">
+          <div class="letter-head">
+            <span class="who">我</span>
+            <span class="when">14:02</span>
+          </div>
+          <div class="body">
+            帮我看一下 symbol 里的三路融合检索，融合后的截断逻辑是不是有问题？感觉相关的结果被砍掉了
+          </div>
+        </section>
+
+        <!-- 2. thought 的回复（主角） -->
+        <section class="letter assistant">
+          <div class="letter-head">
+            <span class="who">thought</span>
+            <span class="when">14:03</span>
+          </div>
+          <div class="body">
+            <p>确实有问题。fusion.rs 里截断阈值是 <code style="font-family:var(--mono);font-size:13.5px;">max(min_score, 首条 × relative_cutoff)</code>，当首条分数异常高时（比如精确命中了标题），relative_cutoff 会把语义相近但分数不到一半的结果全部砍掉。</p>
+            <div class="code-caption">symbol/src/fusion.rs — 示意修复</div>
+            <div class="code"><span class="cm">// 首条为离群值时，退回用中位数做基准</span>
+<span class="kw">let</span> base = <span class="kw">if</span> is_outlier(first, &amp;scores) {
+    median(&amp;scores)
+} <span class="kw">else</span> {
+    first.score
+};
+<span class="kw">let</span> cutoff = min_score.max(base * relative_cutoff);
+results.retain(|r| r.score &gt;= cutoff);</div>
+            <div class="suggestion">
+              <span class="tag">建议</span>
+              首条为离群值时退回用中位数做基准，避免单个精确命中抬高档位、误伤整批语义相近的结果。
+            </div>
+          </div>
+        </section>
+
+        <!-- 3. 用户追问 -->
+        <section class="letter user">
+          <div class="letter-head">
+            <span class="who">我</span>
+            <span class="when">14:04</span>
+          </div>
+          <div class="body">
+            改成首条为异常值时用中位数做基准？去改吧
+          </div>
+        </section>
+
+        <!-- 4. 外包交接：唯一的一行 -->
+        <div class="handoff">已交由 coder 处理 · <a>查看任务 →</a></div>
+
+      </div>
+    </div>
+
+    <footer>
+      <div class="composer">
+        <div class="box">
+          <input type="text" placeholder="继续这个话题……" />
+        </div>
+        <div class="send">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#faf7f2" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M22 2 11 13M22 2l-7 20-4-9-9-4 20-7z"/>
+          </svg>
+        </div>
+      </div>
+      <div class="composer-hint">回车发送 · Shift + 回车换行</div>
+    </footer>
+  </main>
+</div>
+
+<script>
+  // 静态演示：滚动到底部模拟真实会话视角。
+  var s = document.getElementById('scroll');
+  s.scrollTop = s.scrollHeight;
+</script>
+</body>
+</html>

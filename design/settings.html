@@ -1,0 +1,977 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>thought · 设置</title>
+<style>
+  :root {
+    --bg: #0d0f12;
+    --rail: #0a0c0f;
+    --panel: #13161b;
+    --panel-2: #181c22;
+    --panel-3: #1c212a;
+    --input: #0f1216;
+    --line: #23272e;
+    --line-2: #2d333c;
+    --text: #e8e6e1;
+    --sub: #8a8f98;
+    --faint: #5c6169;
+    --accent: #e0574a;
+    --accent-soft: rgba(224, 87, 74, 0.12);
+    --accent-line: rgba(224, 87, 74, 0.45);
+    --green: #58b08c;
+    --green-soft: rgba(88, 176, 140, 0.10);
+    --green-text: #7ec4a6;
+    --sans: -apple-system, "Inter", "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    --mono: "SF Mono", Menlo, Consolas, "Courier New", monospace;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  html, body {
+    height: 100%;
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    font-size: 13.5px;
+    line-height: 1.6;
+    overflow: hidden;
+  }
+
+  /* ---------- 布局骨架：rail + 内容 ---------- */
+  .app {
+    display: grid;
+    grid-template-columns: 56px 1fr;
+    height: 100vh;
+  }
+
+  /* ---------- 56px 深色导航 rail（与任务页一致） ---------- */
+  .rail {
+    background: var(--rail);
+    border-right: 1px solid var(--line);
+    display: flex;
+    flex-direction: column;
+    padding-top: 14px;
+    position: relative;
+    z-index: 2;
+  }
+  .rail-item {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 5px;
+    padding: 11px 0 9px;
+    color: var(--faint);
+    cursor: pointer;
+    font-size: 9.5px;
+    letter-spacing: 0.16em;
+  }
+  .rail-item svg { opacity: 0.85; }
+  .rail-item:hover { color: var(--sub); }
+  .rail-item.active { color: var(--accent); }
+  .rail-item.active svg { opacity: 1; }
+  .rail-item.active::before {
+    content: "";
+    position: absolute;
+    left: 0; top: 22%; bottom: 22%;
+    width: 2px;
+    background: var(--accent);
+  }
+  .rail-item .ping {
+    position: absolute;
+    top: 8px; right: 13px;
+    width: 5px; height: 5px;
+    border-radius: 50%;
+    background: var(--accent);
+    animation: breathe 2.2s ease-in-out infinite;
+  }
+  @keyframes breathe {
+    0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(224, 87, 74, 0.4); }
+    50% { opacity: 0.5; box-shadow: 0 0 0 5px rgba(224, 87, 74, 0); }
+  }
+
+  /* ---------- 内容区 ---------- */
+  main {
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    position: relative;
+  }
+  /* 顶部极淡径向微光 */
+  main::before {
+    content: "";
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 340px;
+    background: radial-gradient(560px 220px at 42% -60px, rgba(224, 87, 74, 0.05), transparent 70%);
+    pointer-events: none;
+    z-index: 0;
+  }
+  .scroll {
+    flex: 1;
+    overflow-y: auto;
+    padding: 30px 0 80px;
+    position: relative;
+    z-index: 1;
+  }
+  .column { max-width: 760px; margin: 0 auto; padding: 0 28px; }
+
+  /* 页头 */
+  .page-head {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    margin-bottom: 4px;
+  }
+  .page-title {
+    font-size: 21px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+  }
+  .page-title .path {
+    font-family: var(--mono);
+    font-size: 11px;
+    font-weight: 400;
+    color: var(--faint);
+    margin-left: 12px;
+    letter-spacing: 0.02em;
+  }
+  .save-btn {
+    background: var(--accent);
+    color: #fff;
+    border: none;
+    border-radius: 6px;
+    font-family: var(--sans);
+    font-size: 12px;
+    letter-spacing: 0.14em;
+    padding: 7px 22px;
+    cursor: pointer;
+    transition: filter 0.15s ease;
+  }
+  .save-btn:hover { filter: brightness(1.1); }
+  .head-note {
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--faint);
+    letter-spacing: 0.06em;
+    text-align: right;
+    margin-bottom: 18px;
+  }
+
+  /* 表单 / 原始 TOML 切换 */
+  .view-tabs {
+    display: inline-flex;
+    border: 1px solid var(--line-2);
+    border-radius: 7px;
+    padding: 2px;
+    background: var(--panel);
+    margin-bottom: 20px;
+  }
+  .view-tab {
+    border: none;
+    background: transparent;
+    font-family: var(--mono);
+    font-size: 10.5px;
+    letter-spacing: 0.14em;
+    color: var(--faint);
+    padding: 5px 16px;
+    border-radius: 5px;
+    cursor: pointer;
+  }
+  .view-tab.active {
+    background: var(--panel-3);
+    color: var(--text);
+  }
+
+  /* ---------- 分区卡片 ---------- */
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 16px 20px 18px;
+    margin-bottom: 14px;
+  }
+  .card-head {
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+    padding-bottom: 10px;
+    margin-bottom: 14px;
+    border-bottom: 1px solid var(--line);
+  }
+  .card-title {
+    font-size: 14px;
+    font-weight: 600;
+    letter-spacing: 0.03em;
+  }
+  .card-tag {
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--faint);
+    letter-spacing: 0.04em;
+  }
+  .card-head .right {
+    margin-left: auto;
+    font-size: 10.5px;
+    color: var(--faint);
+    letter-spacing: 0.03em;
+  }
+
+  /* ---------- 表单控件 ---------- */
+  .fields {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px 18px;
+  }
+  .fields .span2 { grid-column: span 2; }
+  .field label {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    column-gap: 8px;
+    font-size: 11px;
+    color: var(--sub);
+    letter-spacing: 0.04em;
+    margin-bottom: 5px;
+  }
+  .field label .key {
+    font-family: var(--mono);
+    font-size: 9.5px;
+    color: var(--faint);
+    letter-spacing: 0.02em;
+  }
+  .field input[type="text"],
+  .field input[type="number"],
+  .field textarea,
+  .field select {
+    width: 100%;
+    border: 1px solid var(--line-2);
+    border-radius: 6px;
+    background: var(--input);
+    font-family: var(--mono);
+    font-size: 11.5px;
+    color: var(--text);
+    padding: 7px 11px;
+    outline: none;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  }
+  .field textarea {
+    font-family: var(--sans);
+    font-size: 12px;
+    line-height: 1.6;
+    color: var(--sub);
+    resize: none;
+  }
+  .field input:focus,
+  .field textarea:focus,
+  .field select:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-soft);
+  }
+  .field input.num { width: 110px; }
+  .field .hint {
+    font-size: 10px;
+    color: var(--faint);
+    margin-top: 4px;
+    letter-spacing: 0.02em;
+  }
+
+  /* 环境变量值：密钥一律只显示变量名 */
+  .env-input {
+    display: flex;
+    align-items: center;
+    border: 1px solid var(--line-2);
+    border-radius: 6px;
+    background: var(--input);
+    padding: 7px 11px;
+    gap: 8px;
+  }
+  .env-input .env-name {
+    font-family: var(--mono);
+    font-size: 11.5px;
+    color: var(--green-text);
+    flex: 1;
+  }
+  .env-input .lock {
+    flex: none;
+    color: var(--faint);
+    display: flex;
+    align-items: center;
+  }
+  .env-note {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--faint);
+    letter-spacing: 0.05em;
+    margin-top: 12px;
+  }
+
+  /* 开关 */
+  .switch-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 2px 0;
+  }
+  .switch-row .sw-label {
+    font-size: 11.5px;
+    color: var(--sub);
+  }
+  .switch-row .sw-key {
+    font-family: var(--mono);
+    font-size: 9.5px;
+    color: var(--faint);
+  }
+  .switch {
+    width: 32px; height: 18px;
+    border-radius: 9px;
+    background: var(--line-2);
+    position: relative;
+    cursor: pointer;
+    flex: none;
+    transition: background 0.2s ease;
+  }
+  .switch::after {
+    content: "";
+    position: absolute;
+    top: 2.5px; left: 3px;
+    width: 13px; height: 13px;
+    border-radius: 50%;
+    background: var(--sub);
+    transition: transform 0.2s ease, background 0.2s ease;
+  }
+  .switch.on { background: var(--accent); }
+  .switch.on::after { transform: translateX(13px); background: #fff; }
+
+  /* ---------- 模型池 / worker 卡片 ---------- */
+  .model {
+    border: 1px solid var(--line);
+    border-radius: 7px;
+    margin-bottom: 8px;
+    overflow: hidden;
+    background: var(--input);
+  }
+  .model-head {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 9px 14px;
+    cursor: pointer;
+    min-height: 38px;
+  }
+  .model-head:hover { background: var(--panel-2); }
+  .model.open .model-head { background: var(--panel-2); border-bottom: 1px solid var(--line); }
+  .model-name {
+    font-family: var(--mono);
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--text);
+  }
+  .model-meta {
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--faint);
+  }
+  .badge {
+    font-family: var(--mono);
+    font-size: 9px;
+    color: var(--accent);
+    background: var(--accent-soft);
+    border: 1px solid var(--accent-line);
+    border-radius: 4px;
+    padding: 1.5px 7px;
+    letter-spacing: 0.05em;
+  }
+  .model-head .chev {
+    margin-left: auto;
+    font-size: 9px;
+    color: var(--faint);
+    transition: transform 0.25s ease;
+  }
+  .model.open .model-head .chev { transform: rotate(90deg); }
+  .model-body {
+    display: none;
+    padding: 14px 14px 15px;
+  }
+  .model.open .model-body { display: block; }
+
+  .add-model {
+    display: block;
+    width: 100%;
+    border: 1px dashed var(--line-2);
+    border-radius: 7px;
+    background: transparent;
+    color: var(--faint);
+    font-family: var(--mono);
+    font-size: 10.5px;
+    letter-spacing: 0.16em;
+    padding: 10px 0;
+    cursor: pointer;
+    margin-top: 4px;
+    transition: all 0.15s ease;
+  }
+  .add-model:hover { border-color: var(--accent-line); color: var(--accent); background: var(--accent-soft); }
+
+  /* ---------- Agent workers ---------- */
+  .tools-count {
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--faint);
+  }
+  .tool-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 2px; }
+  .tchip {
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--sub);
+    background: var(--panel-3);
+    border: 1px solid var(--line-2);
+    border-radius: 5px;
+    padding: 2px 9px;
+  }
+  .spawn-state {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    margin-left: auto;
+    font-family: var(--mono);
+    font-size: 9.5px;
+    color: var(--faint);
+    letter-spacing: 0.08em;
+  }
+  .spawn-state .mini-dot {
+    width: 5px; height: 5px;
+    border-radius: 50%;
+    background: var(--line-2);
+  }
+  .spawn-state.yes { color: var(--sub); }
+  .spawn-state.yes .mini-dot { background: var(--accent); }
+  .model-head .spawn-state + .chev { margin-left: 0; }
+
+  /* limits 三栏（底对齐，防标签行数不同导致输入错位） */
+  .limits {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 12px 18px;
+    align-items: end;
+  }
+  .limits .field { display: flex; flex-direction: column; }
+  .limits .field label { flex: 1; align-items: flex-start; }
+
+  /* ---------- 原始 TOML 视图 ---------- */
+  .toml-view { display: none; }
+  .toml-pre {
+    background: var(--input);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 18px 22px;
+    font-family: var(--mono);
+    font-size: 11.5px;
+    line-height: 1.7;
+    color: #b7bcc4;
+    white-space: pre;
+    overflow-x: auto;
+  }
+  .toml-pre .cm { color: var(--faint); font-style: italic; }
+  .toml-pre .sec { color: var(--accent); }
+  .toml-pre .k { color: var(--green-text); }
+
+  ::selection { background: rgba(224, 87, 74, 0.25); }
+  .scroll::-webkit-scrollbar { width: 5px; }
+  .scroll::-webkit-scrollbar-thumb { background: var(--line-2); border-radius: 3px; }
+</style>
+</head>
+<body>
+<div class="app">
+
+  <!-- 统一导航 rail（与任务页一致） -->
+  <nav class="rail">
+    <a class="rail-item" href="concept-a.html" style="text-decoration:none;">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M21 11.5a8.5 8.5 0 0 1-8.5 8.5c-1.4 0-2.8-.3-4-.9L3 21l1.9-5.5a8.5 8.5 0 1 1 16.1-4z"/>
+      </svg>
+      对话
+    </a>
+    <a class="rail-item" href="tasks.html" style="text-decoration:none;">
+      <span class="ping"></span>
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M9 6h11M9 12h11M9 18h11"/>
+        <path d="M4 5.5l1.2 1.2L7.5 4.5M4 11.5l1.2 1.2 2.3-2.2M4 17.5l1.2 1.2 2.3-2.2"/>
+      </svg>
+      任务
+    </a>
+    <a class="rail-item active" href="settings.html" style="text-decoration:none;">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M4 8h9M17 8h3M4 16h3M11 16h9"/>
+        <circle cx="15" cy="8" r="2"/>
+        <circle cx="9" cy="16" r="2"/>
+      </svg>
+      设置
+    </a>
+  </nav>
+
+  <!-- 内容区 -->
+  <main>
+    <div class="scroll">
+      <div class="column">
+
+        <div class="page-head">
+          <div class="page-title">设置<span class="path">thought.toml</span></div>
+          <button class="save-btn">保存</button>
+        </div>
+        <div class="head-note">部分修改需重启后生效</div>
+
+        <div class="view-tabs">
+          <button class="view-tab active" id="tab-form" onclick="switchView('form')">表单</button>
+          <button class="view-tab" id="tab-toml" onclick="switchView('toml')">原始 TOML</button>
+        </div>
+
+        <div id="form-view">
+
+          <!-- 服务 -->
+          <section class="card">
+            <div class="card-head">
+              <span class="card-title">服务</span>
+              <span class="card-tag">[http]</span>
+              <span class="right">本地监听，反向代理后对外</span>
+            </div>
+            <div class="fields">
+              <div class="field">
+                <label>监听地址<span class="key">bind</span></label>
+                <input type="text" value="127.0.0.1:8080">
+              </div>
+              <div class="field">
+                <label>静态前端目录<span class="key">web_dir</span></label>
+                <input type="text" value="web">
+                <div class="hint">相对进程工作目录，同源托管在 /</div>
+              </div>
+            </div>
+          </section>
+
+          <!-- 认证 -->
+          <section class="card">
+            <div class="card-head">
+              <span class="card-title">认证</span>
+              <span class="card-tag">[auth]</span>
+            </div>
+            <div class="fields">
+              <div class="field">
+                <label>JWT 密钥<span class="key">jwt_secret_env</span></label>
+                <div class="env-input">
+                  <span class="env-name">THOUGHT_JWT_SECRET</span>
+                  <span class="lock">
+                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+                      <rect x="4" y="11" width="16" height="10" rx="2"/>
+                      <path d="M8 11V7a4 4 0 0 1 8 0v4"/>
+                    </svg>
+                  </span>
+                </div>
+                <div class="hint">至少 32 字节，如 openssl rand -hex 32</div>
+              </div>
+              <div class="field">
+                <label>令牌有效期（秒）<span class="key">token_ttl_secs</span></label>
+                <input type="number" class="num" value="43200">
+              </div>
+              <div class="field">
+                <label>初始管理员<span class="key">bootstrap_admin.username</span></label>
+                <input type="text" value="admin">
+                <div class="hint">首次启动且无用户时创建</div>
+              </div>
+              <div class="field">
+                <label>管理员密码<span class="key">bootstrap_admin.password_env</span></label>
+                <div class="env-input">
+                  <span class="env-name">THOUGHT_ADMIN_PASSWORD</span>
+                  <span class="lock">
+                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+                      <rect x="4" y="11" width="16" height="10" rx="2"/>
+                      <path d="M8 11V7a4 4 0 0 1 8 0v4"/>
+                    </svg>
+                  </span>
+                </div>
+              </div>
+            </div>
+            <div class="env-note">
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
+                <circle cx="12" cy="12" r="9"/>
+                <path d="M12 8v5M12 16h.01"/>
+              </svg>
+              密钥通过环境变量注入，不会写入配置文件或界面
+            </div>
+          </section>
+
+          <!-- 存储 -->
+          <section class="card">
+            <div class="card-head">
+              <span class="card-title">存储</span>
+              <span class="card-tag">[storage]</span>
+              <span class="right">内嵌 SurrealKV，与记忆库共用文件</span>
+            </div>
+            <div class="fields">
+              <div class="field span2">
+                <label>数据端点<span class="key">endpoint</span></label>
+                <input type="text" value="surrealkv://data/thought">
+              </div>
+              <div class="field">
+                <label>命名空间<span class="key">namespace</span></label>
+                <input type="text" value="thought">
+              </div>
+              <div class="field">
+                <label>数据库<span class="key">database</span></label>
+                <input type="text" value="server">
+              </div>
+            </div>
+          </section>
+
+          <!-- 模型池 -->
+          <section class="card">
+            <div class="card-head">
+              <span class="card-title">模型池</span>
+              <span class="card-tag">[models.*]</span>
+              <span class="right">agent 按名字引用</span>
+            </div>
+
+            <!-- deepseek：展开态 -->
+            <div class="model open">
+              <div class="model-head" onclick="this.parentElement.classList.toggle('open')">
+                <span class="model-name">deepseek</span>
+                <span class="model-meta">deepseek · deepseek-v4-pro</span>
+                <span class="chev">▸</span>
+              </div>
+              <div class="model-body">
+                <div class="fields">
+                  <div class="field">
+                    <label>提供商<span class="key">provider</span></label>
+                    <input type="text" value="deepseek">
+                  </div>
+                  <div class="field">
+                    <label>模型<span class="key">model</span></label>
+                    <input type="text" value="deepseek-v4-pro">
+                  </div>
+                  <div class="field span2">
+                    <label>API 密钥<span class="key">api_key_env</span></label>
+                    <div class="env-input">
+                      <span class="env-name">DEEPSEEK_API_KEY</span>
+                      <span class="lock">
+                        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+                          <rect x="4" y="11" width="16" height="10" rx="2"/>
+                          <path d="M8 11V7a4 4 0 0 1 8 0v4"/>
+                        </svg>
+                      </span>
+                    </div>
+                  </div>
+                  <div class="field">
+                    <label>温度<span class="key">temperature</span></label>
+                    <input type="number" class="num" value="0.7" step="0.1">
+                  </div>
+                  <div class="field">
+                    <label>最大输出 tokens<span class="key">max_tokens</span></label>
+                    <input type="number" class="num" value="8192">
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- deepseek-flash：收起态 -->
+            <div class="model">
+              <div class="model-head" onclick="this.parentElement.classList.toggle('open')">
+                <span class="model-name">deepseek-flash</span>
+                <span class="model-meta">deepseek · deepseek-v4-flash</span>
+                <span class="badge">thinking = false</span>
+                <span class="chev">▸</span>
+              </div>
+              <div class="model-body">
+                <div class="fields">
+                  <div class="field">
+                    <label>提供商<span class="key">provider</span></label>
+                    <input type="text" value="deepseek">
+                  </div>
+                  <div class="field">
+                    <label>模型<span class="key">model</span></label>
+                    <input type="text" value="deepseek-v4-flash">
+                  </div>
+                  <div class="field span2">
+                    <label>API 密钥<span class="key">api_key_env</span></label>
+                    <div class="env-input">
+                      <span class="env-name">DEEPSEEK_API_KEY</span>
+                      <span class="lock">
+                        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+                          <rect x="4" y="11" width="16" height="10" rx="2"/>
+                          <path d="M8 11V7a4 4 0 0 1 8 0v4"/>
+                        </svg>
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <button class="add-model">+ 添加模型</button>
+            <div class="env-note">
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
+                <circle cx="12" cy="12" r="9"/>
+                <path d="M12 8v5M12 16h.01"/>
+              </svg>
+              密钥通过环境变量注入
+            </div>
+          </section>
+
+          <!-- 记忆 -->
+          <section class="card">
+            <div class="card-head">
+              <span class="card-title">记忆</span>
+              <span class="card-tag">[memory]</span>
+              <span class="right">持久化长期记忆</span>
+            </div>
+            <div class="fields">
+              <div class="field">
+                <label>命名空间<span class="key">namespace</span></label>
+                <input type="text" value="thought">
+              </div>
+              <div class="field">
+                <label>数据库<span class="key">database</span></label>
+                <input type="text" value="memory">
+              </div>
+              <div class="field">
+                <label>向量维度<span class="key">embedding_dimension</span></label>
+                <input type="number" class="num" value="1024">
+              </div>
+              <div class="field">
+                <label>三元组抽取模型<span class="key">extractor_model</span></label>
+                <input type="text" value="deepseek-flash">
+              </div>
+              <div class="field">
+                <label>半衰期（小时）<span class="key">half_life_hours</span></label>
+                <input type="number" class="num" value="168">
+                <div class="hint">记忆随时间衰减，检索时按新鲜度加权</div>
+              </div>
+              <div class="field">
+                <label>&nbsp;</label>
+                <div class="switch-row">
+                  <span class="switch on" onclick="this.classList.toggle('on')"></span>
+                  <span class="sw-label">每用户独立记忆空间</span>
+                  <span class="sw-key">per_user</span>
+                </div>
+                <div class="switch-row" style="margin-top:8px;">
+                  <span class="switch" onclick="this.classList.toggle('on')"></span>
+                  <span class="sw-label">自动写入用户消息</span>
+                  <span class="sw-key">save_user_messages</span>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <!-- Agent -->
+          <section class="card">
+            <div class="card-head">
+              <span class="card-title">Agent</span>
+              <span class="card-tag">[agent.*]</span>
+              <span class="right">主控派单 · worker 执行</span>
+            </div>
+
+            <div class="fields" style="margin-bottom:14px;">
+              <div class="field">
+                <label>主控模型<span class="key">controller.model</span></label>
+                <input type="text" value="deepseek">
+                <div class="hint">主控尽量只派单，仅开放记忆工具</div>
+              </div>
+            </div>
+
+            <!-- coder：展开态 -->
+            <div class="model worker open">
+              <div class="model-head" onclick="this.parentElement.classList.toggle('open')">
+                <span class="model-name">coder</span>
+                <span class="model-meta">deepseek</span>
+                <span class="tools-count">tools 4 个</span>
+                <span class="spawn-state yes"><span class="mini-dot"></span>可派生子 agent</span>
+                <span class="chev">▸</span>
+              </div>
+              <div class="model-body">
+                <div class="fields">
+                  <div class="field span2">
+                    <label>职责描述<span class="key">description</span></label>
+                    <textarea rows="2">Writes, reads and modifies code and files; runs shell commands to build and test.</textarea>
+                  </div>
+                  <div class="field span2">
+                    <label>系统提示<span class="key">system</span></label>
+                    <textarea rows="3">You are a careful senior software engineer. Inspect before you change, keep changes minimal, and verify by running the build or tests.</textarea>
+                  </div>
+                  <div class="field span2">
+                    <label>工具<span class="key">tools</span></label>
+                    <div class="tool-chips">
+                      <span class="tchip">read_file</span>
+                      <span class="tchip">write_file</span>
+                      <span class="tchip">delete_file</span>
+                      <span class="tchip">run_command</span>
+                    </div>
+                  </div>
+                  <div class="field">
+                    <div class="switch-row">
+                      <span class="switch on" onclick="this.classList.toggle('on')"></span>
+                      <span class="sw-label">允许派生子 agent</span>
+                      <span class="sw-key">can_spawn</span>
+                    </div>
+                  </div>
+                  <div class="field">
+                    <label>模型<span class="key">model</span></label>
+                    <input type="text" value="deepseek">
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- researcher：收起态 -->
+            <div class="model worker">
+              <div class="model-head" onclick="this.parentElement.classList.toggle('open')">
+                <span class="model-name">researcher</span>
+                <span class="model-meta">deepseek-flash</span>
+                <span class="tools-count">tools 1 个</span>
+                <span class="spawn-state"><span class="mini-dot"></span>不可派生</span>
+                <span class="chev">▸</span>
+              </div>
+              <div class="model-body">
+                <div class="fields">
+                  <div class="field span2">
+                    <label>职责描述<span class="key">description</span></label>
+                    <textarea rows="2">Answers questions by reading files and recalling long-term memory; does not modify anything.</textarea>
+                  </div>
+                  <div class="field span2">
+                    <label>系统提示<span class="key">system</span></label>
+                    <textarea rows="2">You research and summarize. Cite the files or memories you used.</textarea>
+                  </div>
+                  <div class="field span2">
+                    <label>工具<span class="key">tools</span></label>
+                    <div class="tool-chips">
+                      <span class="tchip">read_file</span>
+                    </div>
+                  </div>
+                  <div class="field">
+                    <div class="switch-row">
+                      <span class="switch" onclick="this.classList.toggle('on')"></span>
+                      <span class="sw-label">允许派生子 agent</span>
+                      <span class="sw-key">can_spawn</span>
+                    </div>
+                  </div>
+                  <div class="field">
+                    <label>模型<span class="key">model</span></label>
+                    <input type="text" value="deepseek-flash">
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="card-head" style="margin-top:20px; margin-bottom:12px;">
+              <span class="card-title" style="font-size:12.5px;">限额</span>
+              <span class="card-tag">[agent.limits]</span>
+            </div>
+            <div class="limits">
+              <div class="field">
+                <label>最大并发<span class="key">max_concurrent_tasks</span></label>
+                <input type="number" class="num" value="4">
+              </div>
+              <div class="field">
+                <label>子 agent 轮数<span class="key">subagent_max_turns</span></label>
+                <input type="number" class="num" value="30">
+              </div>
+              <div class="field">
+                <label>输出字符上限<span class="key">max_tool_output_chars</span></label>
+                <input type="number" class="num" value="32768">
+              </div>
+            </div>
+          </section>
+
+        </div>
+
+        <!-- 原始 TOML 视图 -->
+        <div class="toml-view" id="toml-view">
+          <div class="toml-pre"><span class="cm"># 密钥一律通过 *_env 从环境变量读取，不要把明文写进仓库。</span>
+
+<span class="sec">[http]</span>
+<span class="k">bind</span> = "127.0.0.1:8080"
+<span class="k">web_dir</span> = "web"
+
+<span class="sec">[auth]</span>
+<span class="k">jwt_secret_env</span> = "THOUGHT_JWT_SECRET"
+<span class="k">token_ttl_secs</span> = 43200
+
+<span class="sec">[auth.bootstrap_admin]</span>
+<span class="k">username</span> = "admin"
+<span class="k">password_env</span> = "THOUGHT_ADMIN_PASSWORD"
+
+<span class="sec">[storage]</span>
+<span class="k">endpoint</span> = "surrealkv://data/thought"
+<span class="k">namespace</span> = "thought"
+<span class="k">database</span> = "server"
+
+<span class="sec">[models.deepseek]</span>
+<span class="k">provider</span> = "deepseek"
+<span class="k">model</span> = "deepseek-v4-pro"
+<span class="k">api_key_env</span> = "DEEPSEEK_API_KEY"
+
+<span class="sec">[models.deepseek-flash]</span>
+<span class="k">provider</span> = "deepseek"
+<span class="k">model</span> = "deepseek-v4-flash"
+<span class="k">api_key_env</span> = "DEEPSEEK_API_KEY"
+<span class="k">thinking</span> = false
+
+<span class="sec">[memory]</span>
+<span class="k">namespace</span> = "thought"
+<span class="k">database</span> = "memory"
+<span class="k">embedding_dimension</span> = 1024
+<span class="k">extractor_model</span> = "deepseek-flash"
+<span class="k">per_user</span> = true
+<span class="k">save_user_messages</span> = false
+<span class="k">half_life_hours</span> = 168.0
+
+<span class="sec">[agent.controller]</span>
+<span class="k">model</span> = "deepseek"
+<span class="k">tools</span> = []
+
+<span class="sec">[[agent.workers]]</span>
+<span class="k">name</span> = "coder"
+<span class="k">model</span> = "deepseek"
+<span class="k">tools</span> = ["read_file", "write_file", "delete_file", "run_command"]
+<span class="k">can_spawn</span> = true
+
+<span class="sec">[[agent.workers]]</span>
+<span class="k">name</span> = "researcher"
+<span class="k">model</span> = "deepseek-flash"
+<span class="k">tools</span> = ["read_file"]
+<span class="k">can_spawn</span> = false
+
+<span class="sec">[agent.limits]</span>
+<span class="k">max_concurrent_tasks</span> = 4
+<span class="k">subagent_max_turns</span> = 30
+<span class="k">max_tool_output_chars</span> = 32768</div>
+        </div>
+
+      </div>
+    </div>
+  </main>
+</div>
+
+<script>
+  // 静态演示：表单 / 原始 TOML 视图切换；卡片展开收起与开关由 inline onclick 处理。
+  function switchView(v) {
+    var form = document.getElementById('form-view');
+    var toml = document.getElementById('toml-view');
+    var tf = document.getElementById('tab-form');
+    var tt = document.getElementById('tab-toml');
+    if (v === 'toml') {
+      form.style.display = 'none';
+      toml.style.display = 'block';
+      tf.classList.remove('active');
+      tt.classList.add('active');
+    } else {
+      form.style.display = 'block';
+      toml.style.display = 'none';
+      tf.classList.add('active');
+      tt.classList.remove('active');
+    }
+  }
+</script>
+</body>
+</html>

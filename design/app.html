@@ -1,0 +1,2731 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>thought</title>
+<style>
+  /* ================================================================
+     共享 shell：:root token、布局骨架、统一深色 rail、幕帘
+     ================================================================ */
+  :root {
+    --mono: "SF Mono", Menlo, Consolas, "Courier New", monospace;
+    /* rail：贯穿两个世界的恒定系统金属边框（取自 tasks.html） */
+    --rail-bg: #0a0c0f;
+    --rail-line: #23272e;
+    --rail-faint: #5c6169;
+    --rail-sub: #8a8f98;
+    --rail-accent: #e0574a;
+    /* 幕帘：比目标页更深的纯色 */
+    --curtain-bg: #08090c;
+    --curtain-edge: #e0574a;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  html, body {
+    height: 100%;
+    overflow: hidden;
+    background: #0d0f12;
+  }
+
+  .app {
+    display: grid;
+    grid-template-columns: 56px 1fr;
+    height: 100vh;
+  }
+
+  /* ---------- 统一深色导航 rail（切换时保持静止） ---------- */
+  .rail {
+    background: var(--rail-bg);
+    border-right: 1px solid var(--rail-line);
+    display: flex;
+    flex-direction: column;
+    padding-top: 14px;
+    position: relative;
+    z-index: 20;
+    font-family: -apple-system, "Inter", "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  }
+  .rail-item {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 5px;
+    padding: 11px 0 9px;
+    color: var(--rail-faint);
+    cursor: pointer;
+    font-size: 9.5px;
+    letter-spacing: 0.16em;
+    user-select: none;
+  }
+  .rail-item svg { opacity: 0.85; }
+  .rail-item:hover { color: var(--rail-sub); }
+  .rail-item.active { color: var(--rail-accent); }
+  .rail-item.active svg { opacity: 1; }
+  /* 当前页指示条：唯一在切换时滑动的 rail 元素 */
+  .rail-ind {
+    position: absolute;
+    left: 0; top: 0;
+    width: 2px;
+    background: var(--rail-accent);
+    transition: transform 0.35s cubic-bezier(0.4, 0, 0.2, 1), height 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+  .rail-ind.instant { transition: none; }
+  .rail-item .ping {
+    position: absolute;
+    top: 8px; right: 13px;
+    width: 5px; height: 5px;
+    border-radius: 50%;
+    background: var(--rail-accent);
+    animation: breathe 2.2s ease-in-out infinite;
+  }
+  @keyframes breathe {
+    0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(224, 87, 74, 0.4); }
+    50% { opacity: 0.5; box-shadow: 0 0 0 5px rgba(224, 87, 74, 0); }
+  }
+
+  /* ---------- 舞台：三个页面堆叠 ---------- */
+  .stage {
+    position: relative;
+    overflow: hidden;
+    min-width: 0;
+  }
+  .page {
+    position: absolute;
+    inset: 0;
+    visibility: hidden;
+    opacity: 0;
+  }
+  .page.active { visibility: visible; opacity: 1; }
+  /* 过渡期间两页同时挂载：旧页在上淡出，新页在下 */
+  body.switching .page.t-out,
+  body.frozen .page.t-out { visibility: visible; z-index: 2; }
+  body.switching .page.t-in,
+  body.frozen .page.t-in { visibility: visible; z-index: 1; }
+
+  /* ---------- 幕帘：扫过内容区（不覆盖 rail） ---------- */
+  .curtain {
+    position: absolute;
+    inset: 0;
+    background: var(--curtain-bg);
+    z-index: 10;
+    transform: translateX(-102%);
+    visibility: hidden;
+  }
+  body.switching .curtain,
+  body.frozen .curtain { visibility: visible; }
+  .curtain .edge {
+    position: absolute;
+    top: 0; bottom: 0;
+    width: 1px;
+    background: var(--curtain-edge);
+    opacity: 0;
+  }
+  .curtain .edge.l { left: 0; }
+  .curtain .edge.r { right: 0; }
+
+  @media (prefers-reduced-motion: reduce) {
+    .rail-ind { transition: none; }
+    .rail-item .ping { animation: none; }
+  }
+
+  /* ================================================================
+     页面作用域：主页 · 对话（浅色书斋，内容区逐像素取自 concept-a.html）
+     ================================================================ */
+  .page-home {
+    --paper: #faf7f2;
+    --paper-deep: #f4efe7;
+    --ink: #1a1a18;
+    --ink-soft: #55524b;
+    --ink-faint: #8a857b;
+    --hairline: #e5e0d8;
+    --hairline-strong: #d8d1c5;
+    --accent: #c2473a;
+    --accent-soft: rgba(194, 71, 58, 0.08);
+    --code-bg: #f1ece3;
+    --serif: Georgia, "Songti SC", "Noto Serif CJK SC", "SimSun", serif;
+    --sans: -apple-system, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Segoe UI", sans-serif;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 14.5px;
+    line-height: 1.65;
+    display: grid;
+    grid-template-columns: 264px 1fr;
+  }
+
+  /* ---------- 会话侧栏 ---------- */
+  .page-home aside {
+    border-right: 1px solid var(--hairline);
+    background: var(--paper);
+    display: flex;
+    flex-direction: column;
+    padding: 26px 0 0;
+    min-height: 0;
+  }
+
+  .page-home .brand {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    padding: 0 28px 24px;
+    border-bottom: 1px solid var(--hairline);
+  }
+  .page-home .brand .name {
+    font-family: var(--serif);
+    font-size: 22px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+  }
+  .page-home .brand .seal {
+    width: 8px; height: 8px;
+    background: var(--accent);
+    border-radius: 50%;
+    transform: translateY(-1px);
+  }
+
+  .page-home .side-label {
+    font-size: 10.5px;
+    letter-spacing: 0.22em;
+    color: var(--ink-faint);
+    padding: 20px 28px 8px;
+    text-transform: uppercase;
+  }
+
+  .page-home .sessions { flex: 1; overflow-y: auto; padding: 0 14px; }
+
+  .page-home .session {
+    padding: 10px 14px;
+    border-radius: 6px;
+    cursor: pointer;
+    position: relative;
+    margin-bottom: 2px;
+  }
+  .page-home .session .t {
+    font-size: 13.5px;
+    color: var(--ink-soft);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .page-home .session.active { background: var(--paper-deep); }
+  .page-home .session.active .t { color: var(--ink); font-weight: 500; }
+  .page-home .session.active::before {
+    content: "";
+    position: absolute;
+    left: 0; top: 11px; bottom: 11px;
+    width: 2px;
+    background: var(--accent);
+    border-radius: 1px;
+  }
+  .page-home .session:not(.active):hover { background: rgba(244, 239, 231, 0.55); }
+
+  /* 侧栏底部入口 */
+  .page-home .side-foot {
+    border-top: 1px solid var(--hairline);
+    padding: 12px 14px 16px;
+  }
+  .page-home .side-entry {
+    display: flex;
+    align-items: center;
+    gap: 11px;
+    padding: 8px 14px;
+    border-radius: 6px;
+    cursor: pointer;
+    color: var(--ink-soft);
+    font-size: 13px;
+    position: relative;
+  }
+  .page-home .side-entry:hover { background: var(--paper-deep); color: var(--ink); }
+  .page-home .side-entry svg { flex: none; opacity: 0.75; }
+  .page-home .side-entry .meta {
+    margin-left: auto;
+    font-size: 11px;
+    color: var(--ink-faint);
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* 悬浮卡片：记忆样例 */
+  .page-home .pop {
+    display: none;
+    position: absolute;
+    left: 0; right: auto; bottom: calc(100% + 6px);
+    width: max-content;
+    max-width: 300px;
+    background: #fffdf9;
+    border: 1px solid var(--hairline-strong);
+    border-radius: 10px;
+    padding: 12px 16px 10px;
+    box-shadow: 0 10px 30px rgba(26, 26, 24, 0.10);
+    z-index: 30;
+    cursor: default;
+  }
+  .page-home .side-entry:hover .pop { display: block; }
+  .page-home .pop .pop-title {
+    font-size: 10px;
+    letter-spacing: 0.22em;
+    color: var(--ink-faint);
+    margin-bottom: 8px;
+  }
+  .page-home .pop .mem {
+    font-size: 12px;
+    color: var(--ink-soft);
+    padding: 6px 0;
+    border-bottom: 1px dashed var(--hairline);
+    display: flex;
+    align-items: baseline;
+    gap: 14px;
+  }
+  .page-home .pop .mem:last-child { border-bottom: none; }
+  .page-home .pop .mem .txt { flex: 1; }
+  .page-home .pop .mem .score {
+    font-family: var(--mono);
+    font-size: 10.5px;
+    color: var(--accent);
+    flex: none;
+  }
+
+  /* ---------- 主区 ---------- */
+  .page-home main {
+    display: flex;
+    flex-direction: column;
+    position: relative;
+    overflow: hidden;
+  }
+
+  /* 顶栏：会话题 */
+  .page-home header {
+    padding: 14px 0 0;
+    text-align: center;
+    position: relative;
+  }
+  .page-home .conv-title {
+    font-family: var(--serif);
+    font-size: 18px;
+    font-weight: 600;
+    letter-spacing: 0.01em;
+  }
+  .page-home .conv-sub {
+    font-family: var(--sans);
+    margin-left: 14px;
+    font-size: 11px;
+    font-weight: 400;
+    color: var(--ink-faint);
+    letter-spacing: 0.06em;
+  }
+
+  /* 对话卷轴 */
+  .page-home .scroll {
+    flex: 1;
+    overflow-y: auto;
+    padding: 10px 0 12px;
+  }
+  .page-home .column {
+    max-width: 720px;
+    margin: 0 auto;
+    padding: 0 28px;
+  }
+
+  /* 消息：信件感 */
+  .page-home .letter { margin-bottom: 20px; }
+  .page-home .letter-head {
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+    margin-bottom: 6px;
+  }
+  .page-home .letter-head .who {
+    font-family: var(--serif);
+    font-size: 14.5px;
+    font-weight: 600;
+  }
+  .page-home .letter-head .when {
+    font-size: 11px;
+    color: var(--ink-faint);
+    letter-spacing: 0.05em;
+  }
+  .page-home .letter.user .who { color: var(--ink-soft); }
+  .page-home .letter.user .body {
+    color: var(--ink-soft);
+    font-size: 14.5px;
+  }
+
+  .page-home .letter.assistant .body { font-size: 14.5px; }
+  .page-home .letter.assistant .body p { margin-bottom: 8px; }
+  .page-home .letter.assistant .body p:last-child { margin-bottom: 0; }
+
+  /* 代码块：信纸上的一小块稿纸 */
+  .page-home .code {
+    background: var(--code-bg);
+    border: 1px solid var(--hairline);
+    border-radius: 8px;
+    padding: 11px 18px;
+    margin: 10px 0 12px;
+    font-family: var(--mono);
+    font-size: 12.5px;
+    line-height: 1.55;
+    overflow-x: auto;
+    white-space: pre;
+    color: #33302a;
+  }
+  .page-home .code .cm { color: #98917f; font-style: italic; }
+  .page-home .code .kw { color: #7a4a8c; }
+  .page-home .code-caption {
+    font-size: 11px;
+    color: var(--ink-faint);
+    letter-spacing: 0.1em;
+    margin-bottom: 6px;
+    font-family: var(--mono);
+  }
+
+  .page-home .suggestion {
+    border-left: 2px solid var(--accent);
+    background: var(--accent-soft);
+    padding: 9px 16px;
+    border-radius: 0 6px 6px 0;
+    font-size: 13.5px;
+    margin-top: 2px;
+  }
+  .page-home .suggestion .tag {
+    font-size: 10.5px;
+    letter-spacing: 0.22em;
+    color: var(--accent);
+    display: block;
+    margin-bottom: 2px;
+  }
+
+  /* 外包交接：唯一的一行 muted 小字 */
+  .page-home .handoff {
+    font-size: 12px;
+    color: var(--ink-faint);
+    letter-spacing: 0.02em;
+    margin: 2px 0 0;
+  }
+  .page-home .handoff a {
+    color: var(--ink-soft);
+    text-decoration: none;
+    border-bottom: 1px solid var(--hairline-strong);
+    padding-bottom: 1px;
+    cursor: pointer;
+  }
+  .page-home .handoff a:hover { color: var(--accent); border-bottom-color: var(--accent); }
+
+  /* ---------- 底部输入框 ---------- */
+  .page-home footer {
+    border-top: 1px solid var(--hairline);
+    padding: 10px 0 10px;
+    background: var(--paper);
+  }
+  .page-home .composer {
+    max-width: 720px;
+    margin: 0 auto;
+    padding: 0 28px;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+  }
+  .page-home .composer .box {
+    flex: 1;
+    border: 1px solid var(--hairline-strong);
+    border-radius: 22px;
+    background: #fffdf9;
+    padding: 9px 20px;
+    display: flex;
+    align-items: center;
+  }
+  .page-home .composer input {
+    border: none;
+    outline: none;
+    background: transparent;
+    font-size: 14px;
+    font-family: var(--sans);
+    color: var(--ink);
+    width: 100%;
+  }
+  .page-home .composer input::placeholder { color: var(--ink-faint); }
+  .page-home .send {
+    width: 34px; height: 34px;
+    border-radius: 50%;
+    background: var(--ink);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    flex: none;
+  }
+  .page-home .send:hover { background: var(--accent); }
+  .page-home .composer-hint {
+    max-width: 720px;
+    margin: 4px auto 0;
+    padding: 0 34px;
+    font-size: 10px;
+    color: var(--ink-faint);
+    letter-spacing: 0.05em;
+    text-align: center;
+  }
+
+  .page-home ::selection { background: rgba(194, 71, 58, 0.15); }
+  .page-home .scroll::-webkit-scrollbar, .page-home .sessions::-webkit-scrollbar { width: 5px; }
+  .page-home .scroll::-webkit-scrollbar-thumb, .page-home .sessions::-webkit-scrollbar-thumb {
+    background: var(--hairline-strong); border-radius: 3px;
+  }
+
+  /* ================================================================
+     页面作用域：任务页 + 设置页共享的深色 token（两页原值一致）
+     ================================================================ */
+  .page-tasks, .page-settings {
+    --bg: #0d0f12;
+    --panel: #13161b;
+    --panel-2: #181c22;
+    --panel-3: #1c212a;
+    --input: #0f1216;
+    --line: #23272e;
+    --line-2: #2d333c;
+    --text: #e8e6e1;
+    --sub: #8a8f98;
+    --faint: #5c6169;
+    --accent: #e0574a;
+    --accent-soft: rgba(224, 87, 74, 0.12);
+    --accent-line: rgba(224, 87, 74, 0.45);
+    --green: #58b08c;
+    --green-soft: rgba(88, 176, 140, 0.10);
+    --green-text: #7ec4a6;
+    --red-text: #e0857c;
+    --gray: #6b7078;
+    --sans: -apple-system, "Inter", "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  }
+
+  /* ================================================================
+     页面作用域：任务页（逐像素取自 tasks.html）
+     ================================================================ */
+  .page-tasks {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    font-size: 13.5px;
+    line-height: 1.6;
+    display: grid;
+    grid-template-rows: 48px 1fr;
+  }
+
+  /* ---------- 顶部系统状态带 ---------- */
+  .page-tasks .statusbar {
+    display: flex;
+    align-items: center;
+    gap: 22px;
+    padding: 0 20px 0 24px;
+    border-bottom: 1px solid var(--line);
+    background: var(--bg);
+    position: relative;
+    z-index: 2;
+  }
+  .page-tasks .sb-title {
+    font-size: 15px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+  }
+  .page-tasks .sb-overview {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--sub);
+    letter-spacing: 0.02em;
+  }
+  .page-tasks .sb-overview b { color: var(--text); font-weight: 500; }
+  .page-tasks .sb-overview .live { color: var(--accent); }
+  .page-tasks .sb-workers {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .page-tasks .chip {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 4px 10px;
+    font-size: 11px;
+  }
+  .page-tasks .chip .wname { font-family: var(--mono); color: var(--text); font-size: 11px; }
+  .page-tasks .chip .wmodel { font-family: var(--mono); color: var(--faint); font-size: 10px; }
+  .page-tasks .chip .wstate { color: var(--sub); font-size: 10.5px; }
+  .page-tasks .chip .wdot {
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    flex: none;
+  }
+  .page-tasks .chip .wdot.idle { background: var(--gray); }
+  .page-tasks .chip .wdot.busy { background: var(--accent); animation: breathe 2.2s ease-in-out infinite; }
+  .page-tasks .chip.busy { border-color: var(--accent-line); }
+  .page-tasks .chip.busy .wstate { color: var(--accent); }
+  .page-tasks .chip .taskno { font-family: var(--mono); font-size: 10px; color: var(--accent); }
+
+  .page-tasks .gauge {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-left: 6px;
+    padding-left: 16px;
+    border-left: 1px solid var(--line);
+    height: 24px;
+  }
+  .page-tasks .gauge .gv {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--sub);
+  }
+  .page-tasks .gauge .gv b { color: var(--text); font-weight: 500; }
+
+  /* ---------- 主区：列表 + 详情 ---------- */
+  .page-tasks .main {
+    display: grid;
+    grid-template-columns: 300px 1fr;
+    min-height: 0;
+  }
+
+  /* ---------- 任务列表栏 ---------- */
+  .page-tasks .list {
+    border-right: 1px solid var(--line);
+    background: var(--bg);
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+  }
+  .page-tasks .tabs {
+    display: flex;
+    gap: 14px;
+    padding: 0 16px;
+    border-bottom: 1px solid var(--line);
+  }
+  .page-tasks .tab {
+    font-size: 11.5px;
+    color: var(--faint);
+    padding: 10px 1px 9px;
+    cursor: pointer;
+    border-bottom: 1px solid transparent;
+    margin-bottom: -1px;
+    letter-spacing: 0.03em;
+  }
+  .page-tasks .tab:hover { color: var(--sub); }
+  .page-tasks .tab.active { color: var(--text); border-bottom-color: var(--accent); }
+  .page-tasks .tab .n {
+    font-family: var(--mono);
+    font-size: 10px;
+    margin-left: 5px;
+    color: var(--faint);
+  }
+  .page-tasks .tab.active .n { color: var(--accent); }
+
+  .page-tasks .tasks {
+    flex: 1;
+    overflow-y: auto;
+    padding: 8px;
+  }
+  .page-tasks .task {
+    position: relative;
+    display: flex;
+    gap: 10px;
+    padding: 10px 12px 9px 14px;
+    border-radius: 6px;
+    border: 1px solid transparent;
+    cursor: pointer;
+    margin-bottom: 3px;
+    overflow: hidden;
+  }
+  .page-tasks .task:hover { background: var(--panel); }
+  .page-tasks .task.selected {
+    background: var(--panel-2);
+    border-color: var(--line-2);
+  }
+  .page-tasks .task.selected::before {
+    content: "";
+    position: absolute;
+    left: 0; top: 0; bottom: 0;
+    width: 2px;
+    background: var(--accent);
+  }
+  /* 进行中条目：左侧极淡朱红呼吸光 */
+  .page-tasks .task.is-running::after {
+    content: "";
+    position: absolute;
+    left: 0; top: 0; bottom: 0;
+    width: 46%;
+    background: linear-gradient(90deg, rgba(224, 87, 74, 0.07), transparent);
+    animation: glow 2.2s ease-in-out infinite;
+    pointer-events: none;
+  }
+  @keyframes glow {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.35; }
+  }
+
+  .page-tasks .sdot {
+    flex: none;
+    width: 7px; height: 7px;
+    border-radius: 50%;
+    margin-top: 6px;
+  }
+  .page-tasks .sdot.running { background: var(--accent); animation: breathe 2.2s ease-in-out infinite; }
+  .page-tasks .sdot.done { background: var(--green); }
+  .page-tasks .sdot.failed { background: var(--accent); box-shadow: inset 0 0 0 1.5px rgba(0, 0, 0, 0.35); }
+  .page-tasks .sdot.canceled { background: var(--gray); }
+
+  .page-tasks .task-main { flex: 1; min-width: 0; position: relative; z-index: 1; }
+  .page-tasks .task-top {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+  }
+  .page-tasks .task-top .who {
+    font-family: var(--mono);
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--text);
+  }
+  .page-tasks .task-top .ago {
+    margin-left: auto;
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--faint);
+    flex: none;
+  }
+  .page-tasks .task-title {
+    font-size: 12.5px;
+    color: var(--sub);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    margin-top: 2px;
+  }
+  .page-tasks .task.selected .task-title { color: var(--text); }
+  .page-tasks .task-meta {
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--faint);
+    margin-top: 4px;
+    letter-spacing: 0.02em;
+  }
+  .page-tasks .task-meta .st-running { color: var(--accent); }
+  .page-tasks .task-meta .st-failed { color: var(--accent); }
+
+  .page-tasks .list-foot {
+    border-top: 1px solid var(--line);
+    padding: 8px 16px;
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--faint);
+    display: flex;
+    justify-content: space-between;
+    letter-spacing: 0.04em;
+  }
+
+  /* ---------- 详情主区 ---------- */
+  .page-tasks .detail {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    overflow: hidden;
+    position: relative;
+  }
+  /* 顶部极淡微光 */
+  .page-tasks .detail::before {
+    content: "";
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 340px;
+    background: radial-gradient(560px 220px at 42% -60px, rgba(224, 87, 74, 0.05), transparent 70%);
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  .page-tasks .task-head {
+    display: flex;
+    align-items: center;
+    gap: 24px;
+    padding: 18px 32px 16px;
+    border-bottom: 1px solid var(--line);
+    position: relative;
+    z-index: 1;
+  }
+  .page-tasks .th-name {
+    font-size: 21px;
+    font-weight: 600;
+    letter-spacing: 0.01em;
+    font-family: var(--mono);
+  }
+  .page-tasks .th-sub {
+    font-size: 11px;
+    color: var(--faint);
+    margin-top: 3px;
+  }
+  .page-tasks .th-sub .model {
+    font-family: var(--mono);
+    font-size: 10.5px;
+    color: var(--accent);
+  }
+  .page-tasks .badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 10.5px;
+    padding: 3px 10px 3px 8px;
+    border-radius: 20px;
+    letter-spacing: 0.12em;
+    vertical-align: 4px;
+    margin-left: 12px;
+    font-family: var(--mono);
+  }
+  .page-tasks .badge.running {
+    background: var(--accent-soft);
+    color: var(--accent);
+    border: 1px solid var(--accent-line);
+  }
+  .page-tasks .badge.running i {
+    width: 5px; height: 5px;
+    border-radius: 50%;
+    background: var(--accent);
+    animation: breathe 2.2s ease-in-out infinite;
+  }
+  .page-tasks .th-stats {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 28px;
+  }
+  .page-tasks .stat { text-align: right; }
+  .page-tasks .stat .k {
+    display: block;
+    font-family: var(--mono);
+    font-size: 9px;
+    letter-spacing: 0.22em;
+    color: var(--faint);
+    text-transform: uppercase;
+  }
+  .page-tasks .stat .v {
+    font-family: var(--mono);
+    font-size: 15px;
+    color: var(--text);
+    font-variant-numeric: tabular-nums;
+  }
+  .page-tasks .cancel {
+    font-family: var(--sans);
+    font-size: 12px;
+    color: var(--accent);
+    background: transparent;
+    border: 1px solid var(--accent-line);
+    border-radius: 6px;
+    padding: 6px 18px;
+    cursor: pointer;
+    letter-spacing: 0.12em;
+  }
+  .page-tasks .cancel:hover { background: var(--accent-soft); border-color: var(--accent); }
+
+  .page-tasks .scroll {
+    flex: 1;
+    overflow-y: auto;
+    position: relative;
+    z-index: 1;
+  }
+  .page-tasks .column {
+    max-width: 860px;
+    padding: 20px 32px 40px;
+  }
+
+  .page-tasks .sec-label {
+    font-family: var(--mono);
+    font-size: 9.5px;
+    letter-spacing: 0.28em;
+    color: var(--faint);
+    text-transform: uppercase;
+    margin: 24px 0 10px 2px;
+  }
+  .page-tasks .sec-label:first-child { margin-top: 0; }
+
+  /* 任务描述卡 */
+  .page-tasks .desc {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 13px 18px 10px;
+  }
+  .page-tasks .desc .body { font-size: 13px; color: var(--text); }
+  .page-tasks .desc .body code {
+    font-family: var(--mono);
+    font-size: 11.5px;
+    color: var(--green-text);
+    background: rgba(88, 176, 140, 0.08);
+    padding: 1px 5px;
+    border-radius: 4px;
+  }
+  .page-tasks .desc .foot {
+    margin-top: 9px;
+    padding-top: 8px;
+    border-top: 1px solid var(--line);
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--faint);
+    display: flex;
+    gap: 20px;
+    letter-spacing: 0.03em;
+  }
+
+  /* ---------- 活动流 ---------- */
+  .page-tasks .stream { position: relative; }
+  .page-tasks .stream::before {
+    content: "";
+    position: absolute;
+    left: 3px; top: 8px; bottom: 8px;
+    width: 1px;
+    background: var(--line-2);
+  }
+  .page-tasks .ev {
+    position: relative;
+    padding-left: 24px;
+    margin-bottom: 14px;
+  }
+  .page-tasks .ev::before {
+    content: "";
+    position: absolute;
+    left: 0; top: 6px;
+    width: 7px; height: 7px;
+    border-radius: 50%;
+    background: var(--bg);
+    border: 1.5px solid var(--line-2);
+  }
+  .page-tasks .ev.key::before { border-color: var(--accent); background: var(--accent); }
+  .page-tasks .ev.live::before { border-color: var(--accent); }
+  .page-tasks .ev.plain::before { display: none; }
+
+  .page-tasks .ev-head {
+    display: flex;
+    align-items: baseline;
+    margin-bottom: 5px;
+  }
+  .page-tasks .ev-tag {
+    font-family: var(--mono);
+    font-size: 9px;
+    letter-spacing: 0.26em;
+    color: var(--faint);
+    text-transform: uppercase;
+  }
+  .page-tasks .ev.live .ev-tag { color: var(--accent); }
+  .page-tasks .ev-ts {
+    margin-left: auto;
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--faint);
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* agent 文本输出 */
+  .page-tasks .agent-line {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+  }
+  .page-tasks .agent-who {
+    font-family: var(--mono);
+    font-size: 11.5px;
+    font-weight: 500;
+    color: var(--text);
+  }
+  .page-tasks .agent-body {
+    font-size: 13px;
+    color: var(--sub);
+    margin-top: 3px;
+    max-width: 640px;
+  }
+  .page-tasks .agent-body code {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--green-text);
+  }
+
+  /* 工具调用卡片 */
+  .page-tasks .tc {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 7px;
+    overflow: hidden;
+  }
+  .page-tasks .tc-head {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 12px;
+    cursor: pointer;
+    min-height: 36px;
+  }
+  .page-tasks .tc-head:hover { background: var(--panel-2); }
+  .page-tasks .tc .tool {
+    font-family: var(--mono);
+    font-size: 11.5px;
+    color: var(--accent);
+    flex: none;
+  }
+  .page-tasks .tc .target {
+    font-family: var(--mono);
+    font-size: 11.5px;
+    color: var(--sub);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .page-tasks .tc .right {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex: none;
+  }
+  .page-tasks .diffstat {
+    font-family: var(--mono);
+    font-size: 10.5px;
+  }
+  .page-tasks .diffstat .add { color: var(--green-text); }
+  .page-tasks .diffstat .del { color: var(--red-text); margin-left: 6px; }
+  .page-tasks .tc .dur {
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--faint);
+    min-width: 34px;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+  }
+  .page-tasks .tc .ok { color: var(--green); font-size: 11px; }
+  .page-tasks .tc .chev {
+    font-size: 9px;
+    color: var(--faint);
+    transition: transform 0.25s ease;
+  }
+  .page-tasks .tc.open .chev { transform: rotate(90deg); }
+
+  .page-tasks .tc-body {
+    display: none;
+    border-top: 1px solid var(--line);
+    padding: 10px 12px 12px;
+  }
+  .page-tasks .tc.open .tc-body { display: block; }
+
+  .page-tasks .mini-label {
+    font-family: var(--mono);
+    font-size: 9px;
+    letter-spacing: 0.24em;
+    color: var(--faint);
+    text-transform: uppercase;
+    margin-bottom: 7px;
+  }
+  .page-tasks .code {
+    background: #0f1216;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 9px 12px;
+    font-family: var(--mono);
+    font-size: 11px;
+    line-height: 1.65;
+    overflow-x: auto;
+    white-space: pre;
+    color: #b7bcc4;
+  }
+  .page-tasks .code .dim { color: var(--faint); }
+
+  /* diff 视图：行号 + 增删色带 */
+  .page-tasks .diff {
+    background: #0f1216;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 8px 0;
+    font-family: var(--mono);
+    font-size: 11px;
+    line-height: 1.7;
+    overflow-x: auto;
+  }
+  .page-tasks .diff .dl {
+    display: flex;
+    white-space: pre;
+    padding: 0 12px 0 0;
+  }
+  .page-tasks .diff .ln {
+    flex: none;
+    width: 38px;
+    text-align: right;
+    padding-right: 12px;
+    color: #454b54;
+    user-select: none;
+  }
+  .page-tasks .diff .dl.add { background: var(--green-soft); color: var(--green-text); }
+  .page-tasks .diff .dl.del { background: rgba(224, 87, 74, 0.09); color: var(--red-text); }
+  .page-tasks .diff .dl.add .ln, .page-tasks .diff .dl.del .ln { color: #4d545e; }
+
+  /* 运行中 */
+  .page-tasks .tc.live { border-color: var(--accent-line); }
+  .page-tasks .live-tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--accent);
+    letter-spacing: 0.05em;
+  }
+  .page-tasks .live-tag i {
+    width: 5px; height: 5px;
+    border-radius: 50%;
+    background: var(--accent);
+    animation: breathe 2.2s ease-in-out infinite;
+  }
+  .page-tasks .spin { animation: rot 1s linear infinite; }
+  @keyframes rot { to { transform: rotate(360deg); } }
+  .page-tasks .tail .cursor::after {
+    content: "▍";
+    color: var(--accent);
+    animation: blink 1.1s steps(2) infinite;
+  }
+  @keyframes blink { 50% { opacity: 0; } }
+
+  /* 子 agent 嵌套 */
+  .page-tasks .sub {
+    margin-left: 4px;
+    border-left: 1px solid var(--line-2);
+    padding-left: 16px;
+  }
+  .page-tasks .sub-head {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 2px 0 8px;
+  }
+  .page-tasks .sub-head .role {
+    font-family: var(--mono);
+    font-size: 11.5px;
+    font-weight: 500;
+    color: var(--text);
+  }
+  .page-tasks .sub-head .chip2 {
+    font-family: var(--mono);
+    font-size: 9px;
+    letter-spacing: 0.14em;
+    color: var(--sub);
+    border: 1px solid var(--line-2);
+    border-radius: 10px;
+    padding: 1px 8px;
+  }
+  .page-tasks .sub-head .note { font-size: 11px; color: var(--faint); }
+  .page-tasks .sub-head .ok { color: var(--green); font-size: 11px; margin-left: auto; }
+
+  /* 记忆条目：相关度细横条 */
+  .page-tasks .mem-list { list-style: none; }
+  .page-tasks .mem-list li {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 6px 0;
+    border-bottom: 1px solid var(--line);
+    font-size: 12px;
+    color: var(--sub);
+  }
+  .page-tasks .mem-list li:last-child { border-bottom: none; }
+  .page-tasks .mem-list .txt { flex: 1; min-width: 0; }
+  .page-tasks .mem-list .bar {
+    flex: none;
+    width: 56px;
+    height: 3px;
+    border-radius: 2px;
+    background: var(--line-2);
+    overflow: hidden;
+  }
+  .page-tasks .mem-list .bar i {
+    display: block;
+    height: 100%;
+    background: var(--accent);
+    border-radius: 2px;
+  }
+  .page-tasks .mem-list .score {
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--accent);
+    flex: none;
+    width: 30px;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* 结果 / 错误卡片（收起样例） */
+  .page-tasks .result-card .rc-tag {
+    font-family: var(--mono);
+    font-size: 9.5px;
+    letter-spacing: 0.2em;
+    flex: none;
+    text-transform: uppercase;
+  }
+  .page-tasks .result-card.is-done .rc-tag { color: var(--green); }
+  .page-tasks .result-card.is-failed .rc-tag { color: var(--accent); }
+  .page-tasks .result-card .rc-sum {
+    font-size: 12px;
+    color: var(--faint);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .page-tasks .rc-body-text { font-size: 12.5px; color: var(--sub); margin-bottom: 8px; }
+  .page-tasks .err-code {
+    background: #0f1216;
+    border: 1px solid var(--line);
+    border-left: 2px solid var(--accent);
+    border-radius: 0 6px 6px 0;
+    padding: 9px 12px;
+    font-family: var(--mono);
+    font-size: 11px;
+    line-height: 1.65;
+    color: #b7bcc4;
+    white-space: pre;
+    overflow-x: auto;
+  }
+  .page-tasks .err-code .ec { color: var(--red-text); }
+
+  .page-tasks ::selection { background: rgba(224, 87, 74, 0.25); }
+  .page-tasks .scroll::-webkit-scrollbar, .page-tasks .tasks::-webkit-scrollbar { width: 5px; }
+  .page-tasks .scroll::-webkit-scrollbar-thumb, .page-tasks .tasks::-webkit-scrollbar-thumb {
+    background: var(--line-2); border-radius: 3px;
+  }
+
+  /* ================================================================
+     页面作用域：设置页（逐像素取自 settings.html）
+     ================================================================ */
+  .page-settings {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    font-size: 13.5px;
+    line-height: 1.6;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    position: relative;
+  }
+  /* 顶部极淡径向微光 */
+  .page-settings::before {
+    content: "";
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 340px;
+    background: radial-gradient(560px 220px at 42% -60px, rgba(224, 87, 74, 0.05), transparent 70%);
+    pointer-events: none;
+    z-index: 0;
+  }
+  .page-settings .scroll {
+    flex: 1;
+    overflow-y: auto;
+    padding: 30px 0 80px;
+    position: relative;
+    z-index: 1;
+  }
+  .page-settings .column { max-width: 760px; margin: 0 auto; padding: 0 28px; }
+
+  /* 页头 */
+  .page-settings .page-head {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    margin-bottom: 4px;
+  }
+  .page-settings .page-title {
+    font-size: 21px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+  }
+  .page-settings .page-title .path {
+    font-family: var(--mono);
+    font-size: 11px;
+    font-weight: 400;
+    color: var(--faint);
+    margin-left: 12px;
+    letter-spacing: 0.02em;
+  }
+  .page-settings .save-btn {
+    background: var(--accent);
+    color: #fff;
+    border: none;
+    border-radius: 6px;
+    font-family: var(--sans);
+    font-size: 12px;
+    letter-spacing: 0.14em;
+    padding: 7px 22px;
+    cursor: pointer;
+    transition: filter 0.15s ease;
+  }
+  .page-settings .save-btn:hover { filter: brightness(1.1); }
+  .page-settings .head-note {
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--faint);
+    letter-spacing: 0.06em;
+    text-align: right;
+    margin-bottom: 18px;
+  }
+
+  /* 表单 / 原始 TOML 切换 */
+  .page-settings .view-tabs {
+    display: inline-flex;
+    border: 1px solid var(--line-2);
+    border-radius: 7px;
+    padding: 2px;
+    background: var(--panel);
+    margin-bottom: 20px;
+  }
+  .page-settings .view-tab {
+    border: none;
+    background: transparent;
+    font-family: var(--mono);
+    font-size: 10.5px;
+    letter-spacing: 0.14em;
+    color: var(--faint);
+    padding: 5px 16px;
+    border-radius: 5px;
+    cursor: pointer;
+  }
+  .page-settings .view-tab.active {
+    background: var(--panel-3);
+    color: var(--text);
+  }
+
+  /* ---------- 分区卡片 ---------- */
+  .page-settings .card {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 16px 20px 18px;
+    margin-bottom: 14px;
+  }
+  .page-settings .card-head {
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+    padding-bottom: 10px;
+    margin-bottom: 14px;
+    border-bottom: 1px solid var(--line);
+  }
+  .page-settings .card-title {
+    font-size: 14px;
+    font-weight: 600;
+    letter-spacing: 0.03em;
+  }
+  .page-settings .card-tag {
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--faint);
+    letter-spacing: 0.04em;
+  }
+  .page-settings .card-head .right {
+    margin-left: auto;
+    font-size: 10.5px;
+    color: var(--faint);
+    letter-spacing: 0.03em;
+  }
+
+  /* ---------- 表单控件 ---------- */
+  .page-settings .fields {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px 18px;
+  }
+  .page-settings .fields .span2 { grid-column: span 2; }
+  .page-settings .field label {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    column-gap: 8px;
+    font-size: 11px;
+    color: var(--sub);
+    letter-spacing: 0.04em;
+    margin-bottom: 5px;
+  }
+  .page-settings .field label .key {
+    font-family: var(--mono);
+    font-size: 9.5px;
+    color: var(--faint);
+    letter-spacing: 0.02em;
+  }
+  .page-settings .field input[type="text"],
+  .page-settings .field input[type="number"],
+  .page-settings .field textarea,
+  .page-settings .field select {
+    width: 100%;
+    border: 1px solid var(--line-2);
+    border-radius: 6px;
+    background: var(--input);
+    font-family: var(--mono);
+    font-size: 11.5px;
+    color: var(--text);
+    padding: 7px 11px;
+    outline: none;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  }
+  .page-settings .field textarea {
+    font-family: var(--sans);
+    font-size: 12px;
+    line-height: 1.6;
+    color: var(--sub);
+    resize: none;
+  }
+  .page-settings .field input:focus,
+  .page-settings .field textarea:focus,
+  .page-settings .field select:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-soft);
+  }
+  .page-settings .field input.num { width: 110px; }
+  .page-settings .field .hint {
+    font-size: 10px;
+    color: var(--faint);
+    margin-top: 4px;
+    letter-spacing: 0.02em;
+  }
+
+  /* 环境变量值：密钥一律只显示变量名 */
+  .page-settings .env-input {
+    display: flex;
+    align-items: center;
+    border: 1px solid var(--line-2);
+    border-radius: 6px;
+    background: var(--input);
+    padding: 7px 11px;
+    gap: 8px;
+  }
+  .page-settings .env-input .env-name {
+    font-family: var(--mono);
+    font-size: 11.5px;
+    color: var(--green-text);
+    flex: 1;
+  }
+  .page-settings .env-input .lock {
+    flex: none;
+    color: var(--faint);
+    display: flex;
+    align-items: center;
+  }
+  .page-settings .env-note {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--faint);
+    letter-spacing: 0.05em;
+    margin-top: 12px;
+  }
+
+  /* 开关 */
+  .page-settings .switch-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 2px 0;
+  }
+  .page-settings .switch-row .sw-label {
+    font-size: 11.5px;
+    color: var(--sub);
+  }
+  .page-settings .switch-row .sw-key {
+    font-family: var(--mono);
+    font-size: 9.5px;
+    color: var(--faint);
+  }
+  .page-settings .switch {
+    width: 32px; height: 18px;
+    border-radius: 9px;
+    background: var(--line-2);
+    position: relative;
+    cursor: pointer;
+    flex: none;
+    transition: background 0.2s ease;
+  }
+  .page-settings .switch::after {
+    content: "";
+    position: absolute;
+    top: 2.5px; left: 3px;
+    width: 13px; height: 13px;
+    border-radius: 50%;
+    background: var(--sub);
+    transition: transform 0.2s ease, background 0.2s ease;
+  }
+  .page-settings .switch.on { background: var(--accent); }
+  .page-settings .switch.on::after { transform: translateX(13px); background: #fff; }
+
+  /* ---------- 模型池 / worker 卡片 ---------- */
+  .page-settings .model {
+    border: 1px solid var(--line);
+    border-radius: 7px;
+    margin-bottom: 8px;
+    overflow: hidden;
+    background: var(--input);
+  }
+  .page-settings .model-head {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 9px 14px;
+    cursor: pointer;
+    min-height: 38px;
+  }
+  .page-settings .model-head:hover { background: var(--panel-2); }
+  .page-settings .model.open .model-head { background: var(--panel-2); border-bottom: 1px solid var(--line); }
+  .page-settings .model-name {
+    font-family: var(--mono);
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--text);
+  }
+  .page-settings .model-meta {
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--faint);
+  }
+  .page-settings .badge {
+    font-family: var(--mono);
+    font-size: 9px;
+    color: var(--accent);
+    background: var(--accent-soft);
+    border: 1px solid var(--accent-line);
+    border-radius: 4px;
+    padding: 1.5px 7px;
+    letter-spacing: 0.05em;
+  }
+  .page-settings .model-head .chev {
+    margin-left: auto;
+    font-size: 9px;
+    color: var(--faint);
+    transition: transform 0.25s ease;
+  }
+  .page-settings .model.open .model-head .chev { transform: rotate(90deg); }
+  .page-settings .model-body {
+    display: none;
+    padding: 14px 14px 15px;
+  }
+  .page-settings .model.open .model-body { display: block; }
+
+  .page-settings .add-model {
+    display: block;
+    width: 100%;
+    border: 1px dashed var(--line-2);
+    border-radius: 7px;
+    background: transparent;
+    color: var(--faint);
+    font-family: var(--mono);
+    font-size: 10.5px;
+    letter-spacing: 0.16em;
+    padding: 10px 0;
+    cursor: pointer;
+    margin-top: 4px;
+    transition: all 0.15s ease;
+  }
+  .page-settings .add-model:hover { border-color: var(--accent-line); color: var(--accent); background: var(--accent-soft); }
+
+  /* ---------- Agent workers ---------- */
+  .page-settings .tools-count {
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--faint);
+  }
+  .page-settings .tool-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 2px; }
+  .page-settings .tchip {
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--sub);
+    background: var(--panel-3);
+    border: 1px solid var(--line-2);
+    border-radius: 5px;
+    padding: 2px 9px;
+  }
+  .page-settings .spawn-state {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    margin-left: auto;
+    font-family: var(--mono);
+    font-size: 9.5px;
+    color: var(--faint);
+    letter-spacing: 0.08em;
+  }
+  .page-settings .spawn-state .mini-dot {
+    width: 5px; height: 5px;
+    border-radius: 50%;
+    background: var(--line-2);
+  }
+  .page-settings .spawn-state.yes { color: var(--sub); }
+  .page-settings .spawn-state.yes .mini-dot { background: var(--accent); }
+  .page-settings .model-head .spawn-state + .chev { margin-left: 0; }
+
+  /* limits 三栏（底对齐，防标签行数不同导致输入错位） */
+  .page-settings .limits {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 12px 18px;
+    align-items: end;
+  }
+  .page-settings .limits .field { display: flex; flex-direction: column; }
+  .page-settings .limits .field label { flex: 1; align-items: flex-start; }
+
+  /* ---------- 原始 TOML 视图 ---------- */
+  .page-settings .toml-view { display: none; }
+  .page-settings .toml-pre {
+    background: var(--input);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 18px 22px;
+    font-family: var(--mono);
+    font-size: 11.5px;
+    line-height: 1.7;
+    color: #b7bcc4;
+    white-space: pre;
+    overflow-x: auto;
+  }
+  .page-settings .toml-pre .cm { color: var(--faint); font-style: italic; }
+  .page-settings .toml-pre .sec { color: var(--accent); }
+  .page-settings .toml-pre .k { color: var(--green-text); }
+
+  .page-settings ::selection { background: rgba(224, 87, 74, 0.25); }
+  .page-settings .scroll::-webkit-scrollbar { width: 5px; }
+  .page-settings .scroll::-webkit-scrollbar-thumb { background: var(--line-2); border-radius: 3px; }
+</style>
+</head>
+<body>
+<div class="app">
+
+  <!-- 统一深色导航 rail：三个页面共用，切换时保持静止 -->
+  <nav class="rail" id="rail">
+    <span class="rail-ind" id="rail-ind"></span>
+    <div class="rail-item" data-page="home">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M21 11.5a8.5 8.5 0 0 1-8.5 8.5c-1.4 0-2.8-.3-4-.9L3 21l1.9-5.5a8.5 8.5 0 1 1 16.1-4z"/>
+      </svg>
+      对话
+    </div>
+    <div class="rail-item" data-page="tasks">
+      <span class="ping"></span>
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M9 6h11M9 12h11M9 18h11"/>
+        <path d="M4 5.5l1.2 1.2L7.5 4.5M4 11.5l1.2 1.2 2.3-2.2M4 17.5l1.2 1.2 2.3-2.2"/>
+      </svg>
+      任务
+    </div>
+    <div class="rail-item" data-page="settings">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M4 8h9M17 8h3M4 16h3M11 16h9"/>
+        <circle cx="15" cy="8" r="2"/>
+        <circle cx="9" cy="16" r="2"/>
+      </svg>
+      设置
+    </div>
+  </nav>
+
+  <!-- 舞台：三个页面堆叠在同一布局里，幕帘只扫过这里 -->
+  <div class="stage" id="stage">
+
+  <!-- ================= 主页 · 对话（浅色书斋） ================= -->
+  <section class="page page-home" data-page="home">
+
+    <!-- 会话侧栏 -->
+    <aside>
+      <div class="brand">
+        <span class="name">thought</span>
+        <span class="seal"></span>
+      </div>
+
+      <div class="side-label">会话</div>
+      <nav class="sessions" id="sessions">
+        <div class="session active"><div class="t">给 thought 配前端</div></div>
+        <div class="session"><div class="t">重构记忆检索</div></div>
+        <div class="session"><div class="t">周报草稿</div></div>
+        <div class="session"><div class="t">Rust async 讨论</div></div>
+        <div class="session"><div class="t">部署到 VPS</div></div>
+      </nav>
+
+      <div class="side-foot">
+        <div class="side-entry">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
+            <path d="M4 5a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V5z"/>
+            <path d="M8 8h8M8 12h8M8 16h5"/>
+          </svg>
+          记忆
+          <span class="meta">128 条</span>
+          <div class="pop">
+            <div class="pop-title">最近记忆</div>
+            <div class="mem"><span class="txt">用户偏好：解释要引用文件行号</span><span class="score">0.83</span></div>
+            <div class="mem"><span class="txt">fusion.rs 的 relative_cutoff = 0.5</span><span class="score">0.77</span></div>
+            <div class="mem"><span class="txt">检索融合三路：semantic / sparse / graph</span><span class="score">0.71</span></div>
+          </div>
+        </div>
+      </div>
+    </aside>
+
+    <!-- 主区 -->
+    <main>
+      <header>
+        <div class="conv-title">给 thought 配前端<span class="conv-sub">主控 controller · deepseek</span></div>
+      </header>
+
+      <div class="scroll" id="home-scroll">
+        <div class="column">
+
+          <!-- 1. 用户来信 -->
+          <section class="letter user">
+            <div class="letter-head">
+              <span class="who">我</span>
+              <span class="when">14:02</span>
+            </div>
+            <div class="body">
+              帮我看一下 symbol 里的三路融合检索，融合后的截断逻辑是不是有问题？感觉相关的结果被砍掉了
+            </div>
+          </section>
+
+          <!-- 2. thought 的回复（主角） -->
+          <section class="letter assistant">
+            <div class="letter-head">
+              <span class="who">thought</span>
+              <span class="when">14:03</span>
+            </div>
+            <div class="body">
+              <p>确实有问题。fusion.rs 里截断阈值是 <code style="font-family:var(--mono);font-size:13.5px;">max(min_score, 首条 × relative_cutoff)</code>，当首条分数异常高时（比如精确命中了标题），relative_cutoff 会把语义相近但分数不到一半的结果全部砍掉。</p>
+              <div class="code-caption">symbol/src/fusion.rs — 示意修复</div>
+              <div class="code"><span class="cm">// 首条为离群值时，退回用中位数做基准</span>
+<span class="kw">let</span> base = <span class="kw">if</span> is_outlier(first, &amp;scores) {
+    median(&amp;scores)
+} <span class="kw">else</span> {
+    first.score
+};
+<span class="kw">let</span> cutoff = min_score.max(base * relative_cutoff);
+results.retain(|r| r.score &gt;= cutoff);</div>
+              <div class="suggestion">
+                <span class="tag">建议</span>
+                首条为离群值时退回用中位数做基准，避免单个精确命中抬高档位、误伤整批语义相近的结果。
+              </div>
+            </div>
+          </section>
+
+          <!-- 3. 用户追问 -->
+          <section class="letter user">
+            <div class="letter-head">
+              <span class="who">我</span>
+              <span class="when">14:04</span>
+            </div>
+            <div class="body">
+              改成首条为异常值时用中位数做基准？去改吧
+            </div>
+          </section>
+
+          <!-- 4. 外包交接：唯一的一行 -->
+          <div class="handoff">已交由 coder 处理 · <a>查看任务 →</a></div>
+
+        </div>
+      </div>
+
+      <footer>
+        <div class="composer">
+          <div class="box">
+            <input type="text" placeholder="继续这个话题……" />
+          </div>
+          <div class="send">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#faf7f2" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M22 2 11 13M22 2l-7 20-4-9-9-4 20-7z"/>
+            </svg>
+          </div>
+        </div>
+        <div class="composer-hint">回车发送 · Shift + 回车换行</div>
+      </footer>
+    </main>
+  </section>
+
+  <!-- ================= 任务页（深色机房） ================= -->
+  <section class="page page-tasks" data-page="tasks">
+
+    <!-- 顶部系统状态带 -->
+    <div class="statusbar">
+      <span class="sb-title">任务</span>
+      <span class="sb-overview"><span class="live">● 进行中 <b>1</b></span> · 今日完成 <b>5</b> · 失败 <b>1</b></span>
+      <div class="sb-workers">
+        <div class="chip">
+          <span class="wdot idle"></span>
+          <span class="wname">controller</span>
+          <span class="wmodel">deepseek</span>
+          <span class="wstate">待命</span>
+        </div>
+        <div class="chip busy">
+          <span class="wdot busy"></span>
+          <span class="wname">coder</span>
+          <span class="wmodel">deepseek</span>
+          <span class="wstate">执行中</span>
+          <span class="taskno">#5</span>
+        </div>
+        <div class="chip">
+          <span class="wdot idle"></span>
+          <span class="wname">researcher</span>
+          <span class="wmodel">deepseek-flash</span>
+          <span class="wstate">空闲</span>
+        </div>
+        <div class="gauge">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
+            <circle cx="12" cy="12" r="9" stroke="#343a44" stroke-width="2.5"/>
+            <circle cx="12" cy="12" r="9" stroke="#e0574a" stroke-width="2.5" stroke-linecap="round"
+                    stroke-dasharray="14.1 56.5" transform="rotate(-90 12 12)"/>
+          </svg>
+          <span class="gv"><b>1</b> / 4</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- 主区 -->
+    <div class="main">
+
+      <!-- 任务列表栏 -->
+      <div class="list">
+        <div class="tabs" id="task-tabs">
+          <div class="tab active" data-filter="all">全部<span class="n">4</span></div>
+          <div class="tab" data-filter="running">进行中<span class="n">1</span></div>
+          <div class="tab" data-filter="done">已完成<span class="n">2</span></div>
+          <div class="tab" data-filter="failed">失败<span class="n">1</span></div>
+        </div>
+
+        <div class="tasks" id="task-list">
+          <div class="task selected is-running" data-status="running">
+            <span class="sdot running"></span>
+            <div class="task-main">
+              <div class="task-top"><span class="who">coder#5</span><span class="ago">刚刚</span></div>
+              <div class="task-title">修改截断基准并回归测试</div>
+              <div class="task-meta"><span class="st-running">RUN</span> · 18s · 1,872 tok</div>
+            </div>
+          </div>
+          <div class="task" data-status="done">
+            <span class="sdot done"></span>
+            <div class="task-main">
+              <div class="task-top"><span class="who">coder#3</span><span class="ago">2 分钟前</span></div>
+              <div class="task-title">分析检索融合与截断逻辑</div>
+              <div class="task-meta">OK · 47s · 4,213 tok</div>
+            </div>
+          </div>
+          <div class="task" data-status="done">
+            <span class="sdot done"></span>
+            <div class="task-main">
+              <div class="task-top"><span class="who">researcher#2</span><span class="ago">9 分钟前</span></div>
+              <div class="task-title">调研 SurrealDB 索引策略</div>
+              <div class="task-meta">OK · 2m10s · 6,540 tok</div>
+            </div>
+          </div>
+          <div class="task" data-status="failed">
+            <span class="sdot failed"></span>
+            <div class="task-main">
+              <div class="task-top"><span class="who">coder#1</span><span class="ago">26 分钟前</span></div>
+              <div class="task-title">清理 target 目录脚本</div>
+              <div class="task-meta"><span class="st-failed">ERR</span> · 12s · 980 tok</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="list-foot">
+          <span>QUEUE 0</span>
+          <span>CONCURRENCY 1/4</span>
+        </div>
+      </div>
+
+      <!-- 详情主区 -->
+      <div class="detail">
+        <div class="task-head">
+          <div>
+            <span class="th-name">coder#5</span>
+            <span class="badge running"><i></i>进行中</span>
+            <div class="th-sub">模型 <span class="model">deepseek</span> · 由 controller 派单 · 会话「给 thought 配前端」</div>
+          </div>
+          <div class="th-stats">
+            <div class="stat"><span class="k">Elapsed</span><span class="v">18s</span></div>
+            <div class="stat"><span class="k">Tokens</span><span class="v">1,872</span></div>
+            <button class="cancel">取消</button>
+          </div>
+        </div>
+
+        <div class="scroll">
+          <div class="column">
+
+            <!-- 任务描述 -->
+            <div class="sec-label">Task</div>
+            <div class="desc">
+              <div class="body">把 <code>fusion.rs</code> 的截断基准改成：首条为离群值时退回中位数，并补回归测试。</div>
+              <div class="foot">
+                <span>DISPATCHED 14:04:02</span>
+                <span>SPAWN ALLOWED</span>
+                <span>TOOLS 4</span>
+              </div>
+            </div>
+
+            <!-- 活动流 -->
+            <div class="sec-label">Activity</div>
+            <div class="stream">
+
+              <!-- 检索记忆 -->
+              <div class="ev">
+                <div class="ev-head"><span class="ev-tag">MEM</span><span class="ev-ts">14:04:02</span></div>
+                <div class="tc" onclick="this.classList.toggle('open')">
+                  <div class="tc-head">
+                    <span class="tool">memory</span>
+                    <span class="target">检索「截断 基准 离群值」 — 命中 2 条</span>
+                    <div class="right">
+                      <span class="dur">0.4s</span>
+                      <span class="ok">✓</span>
+                      <span class="chev">▸</span>
+                    </div>
+                  </div>
+                  <div class="tc-body">
+                    <div class="mini-label">Hits · 2</div>
+                    <ul class="mem-list">
+                      <li>
+                        <span class="txt">fusion.rs 的 relative_cutoff = 0.5，首条精确命中时误伤语义相近结果</span>
+                        <span class="bar"><i style="width:83%"></i></span>
+                        <span class="score">0.83</span>
+                      </li>
+                      <li>
+                        <span class="txt">检索融合三路：semantic / sparse / graph，截断发生在融合之后</span>
+                        <span class="bar"><i style="width:76%"></i></span>
+                        <span class="score">0.76</span>
+                      </li>
+                    </ul>
+                  </div>
+                </div>
+              </div>
+
+              <!-- read_file -->
+              <div class="ev">
+                <div class="ev-head"><span class="ev-tag">TOOL</span><span class="ev-ts">14:04:03</span></div>
+                <div class="tc" onclick="this.classList.toggle('open')">
+                  <div class="tc-head">
+                    <span class="tool">read_file</span>
+                    <span class="target">symbol/src/fusion.rs</span>
+                    <div class="right">
+                      <span class="dur">0.2s</span>
+                      <span class="ok">✓</span>
+                      <span class="chev">▸</span>
+                    </div>
+                  </div>
+                  <div class="tc-body">
+                    <div class="mini-label">Params</div>
+                    <div class="code"><span class="dim">path:</span> symbol/src/fusion.rs
+<span class="dim">read:</span>  214 lines · 截断段定位 L87–L104</div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- agent 文本输出 -->
+              <div class="ev">
+                <div class="ev-head"><span class="ev-tag">AGENT</span><span class="ev-ts">14:04:11</span></div>
+                <div class="agent-line"><span class="agent-who">coder#5</span></div>
+                <div class="agent-body">确认问题点：截断基准直接取首条分数，首条为离群值时 <code>relative_cutoff</code> 会误伤整批。改为离群回退中位数，先改实现再补回归。</div>
+              </div>
+
+              <!-- edit_file（默认展开 diff 视图） -->
+              <div class="ev key">
+                <div class="ev-head"><span class="ev-tag">DIFF</span><span class="ev-ts">14:04:13</span></div>
+                <div class="tc open" onclick="this.classList.toggle('open')">
+                  <div class="tc-head">
+                    <span class="tool">edit_file</span>
+                    <span class="target">symbol/src/fusion.rs</span>
+                    <div class="right">
+                      <span class="diffstat"><span class="add">+6</span><span class="del">−2</span></span>
+                      <span class="dur">1.1s</span>
+                      <span class="ok">✓</span>
+                      <span class="chev">▸</span>
+                    </div>
+                  </div>
+                  <div class="tc-body">
+                    <div class="mini-label">Diff · symbol/src/fusion.rs</div>
+                    <div class="diff"><span class="dl del"><span class="ln">87</span>- let base = scores[0].score;</span>
+<span class="dl del"><span class="ln">88</span>- let cutoff = min_score.max(base * relative_cutoff);</span>
+<span class="dl add"><span class="ln">87</span>+ let base = if is_outlier(&amp;scores[0], &amp;scores) {</span>
+<span class="dl add"><span class="ln">88</span>+     median(&amp;scores)</span>
+<span class="dl add"><span class="ln">89</span>+ } else {</span>
+<span class="dl add"><span class="ln">90</span>+     scores[0].score</span>
+<span class="dl add"><span class="ln">91</span>+ };</span>
+<span class="dl add"><span class="ln">92</span>+ let cutoff = min_score.max(base * relative_cutoff);</span></div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- read_file 测试 -->
+              <div class="ev">
+                <div class="ev-head"><span class="ev-tag">TOOL</span><span class="ev-ts">14:04:15</span></div>
+                <div class="tc" onclick="this.classList.toggle('open')">
+                  <div class="tc-head">
+                    <span class="tool">read_file</span>
+                    <span class="target">symbol/tests/fusion.rs</span>
+                    <div class="right">
+                      <span class="dur">0.2s</span>
+                      <span class="ok">✓</span>
+                      <span class="chev">▸</span>
+                    </div>
+                  </div>
+                  <div class="tc-body">
+                    <div class="mini-label">Params</div>
+                    <div class="code"><span class="dim">path:</span> symbol/tests/fusion.rs
+<span class="dim">read:</span>  96 lines · 既有断言 6 条，新增用例追加于末尾</div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- 子 agent 嵌套 -->
+              <div class="ev">
+                <div class="ev-head"><span class="ev-tag">SUB</span><span class="ev-ts">14:04:16</span></div>
+                <div class="sub">
+                  <div class="sub-head">
+                    <span class="role">sub1</span>
+                    <span class="chip2">SUB-AGENT · CODER</span>
+                    <span class="note">交叉验证中位数工具函数是否已有实现</span>
+                    <span class="ok">✓</span>
+                  </div>
+                  <div class="tc" onclick="this.classList.toggle('open')">
+                    <div class="tc-head">
+                      <span class="tool">read_file</span>
+                      <span class="target">symbol/src/lib.rs</span>
+                      <div class="right">
+                        <span class="dur">0.2s</span>
+                        <span class="ok">✓</span>
+                        <span class="chev">▸</span>
+                      </div>
+                    </div>
+                    <div class="tc-body">
+                      <div class="mini-label">Params</div>
+                      <div class="code"><span class="dim">path:</span> symbol/src/lib.rs
+<span class="dim">note:</span>  median / is_outlier 需自带，utils 中无现成实现</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- run_command 运行中 -->
+              <div class="ev live">
+                <div class="ev-head"><span class="ev-tag">CMD</span><span class="ev-ts">14:04:17</span></div>
+                <div class="tc live open" onclick="this.classList.toggle('open')">
+                  <div class="tc-head">
+                    <span class="tool">run_command</span>
+                    <span class="target">cargo test -p symbol fusion</span>
+                    <div class="right">
+                      <span class="live-tag"><i></i>RUNNING 3s</span>
+                      <svg class="spin" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#e0574a" stroke-width="2.4" stroke-linecap="round">
+                        <path d="M12 3a9 9 0 1 1-9 9"/>
+                      </svg>
+                      <span class="chev">▸</span>
+                    </div>
+                  </div>
+                  <div class="tc-body">
+                    <div class="mini-label">Output · Tail</div>
+                    <div class="code tail"><span class="dim">running 7 tests</span>
+<span class="cursor">test fusion::tests::cutoff_outlier_uses_median ... ok </span></div>
+                  </div>
+                </div>
+              </div>
+
+            </div>
+
+            <!-- 结果 / 错误卡片 · 收起样例 -->
+            <div class="sec-label">Result / Error · 样式样例</div>
+
+            <div class="ev plain" style="padding-left:0;margin-bottom:10px;">
+              <div class="tc result-card is-done" onclick="this.classList.toggle('open')">
+                <div class="tc-head">
+                  <span class="rc-tag">Result</span>
+                  <span class="rc-sum">任务完成后在此生成 — 样例：coder#3「分析检索融合与截断逻辑」</span>
+                  <div class="right">
+                    <span class="chev">▸</span>
+                  </div>
+                </div>
+                <div class="tc-body">
+                  <div class="rc-body-text">截断逻辑确认有误：基准取自首条分数，离群精确命中会抬高档位。建议离群时回退中位数，已附定位行号与修复草案，转交 coder#5 执行。</div>
+                  <div class="code"><span class="dim">elapsed</span> 47s · <span class="dim">tool calls</span> 3 · <span class="dim">tokens</span> 4,213</div>
+                </div>
+              </div>
+            </div>
+
+            <div class="ev plain" style="padding-left:0;">
+              <div class="tc result-card is-failed" onclick="this.classList.toggle('open')">
+                <div class="tc-head">
+                  <span class="rc-tag">Error</span>
+                  <span class="rc-sum">失败时在此呈现 — 样例：coder#1「清理 target 目录脚本」</span>
+                  <div class="right">
+                    <span class="chev">▸</span>
+                  </div>
+                </div>
+                <div class="tc-body">
+                  <div class="rc-body-text">清理脚本在第 3 步失败，已保留现场，未删除任何文件。</div>
+                  <div class="err-code">rm: cannot remove 'target/debug/incremental': Permission denied
+<span class="ec">exit code: 1</span></div>
+                </div>
+              </div>
+            </div>
+
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= 设置页（深色机房） ================= -->
+  <section class="page page-settings" data-page="settings">
+    <div class="scroll">
+      <div class="column">
+
+        <div class="page-head">
+          <div class="page-title">设置<span class="path">thought.toml</span></div>
+          <button class="save-btn">保存</button>
+        </div>
+        <div class="head-note">部分修改需重启后生效</div>
+
+        <div class="view-tabs">
+          <button class="view-tab active" id="tab-form" onclick="switchView('form')">表单</button>
+          <button class="view-tab" id="tab-toml" onclick="switchView('toml')">原始 TOML</button>
+        </div>
+
+        <div id="form-view">
+
+          <!-- 服务 -->
+          <section class="card">
+            <div class="card-head">
+              <span class="card-title">服务</span>
+              <span class="card-tag">[http]</span>
+              <span class="right">本地监听，反向代理后对外</span>
+            </div>
+            <div class="fields">
+              <div class="field">
+                <label>监听地址<span class="key">bind</span></label>
+                <input type="text" value="127.0.0.1:8080">
+              </div>
+              <div class="field">
+                <label>静态前端目录<span class="key">web_dir</span></label>
+                <input type="text" value="web">
+                <div class="hint">相对进程工作目录，同源托管在 /</div>
+              </div>
+            </div>
+          </section>
+
+          <!-- 认证 -->
+          <section class="card">
+            <div class="card-head">
+              <span class="card-title">认证</span>
+              <span class="card-tag">[auth]</span>
+            </div>
+            <div class="fields">
+              <div class="field">
+                <label>JWT 密钥<span class="key">jwt_secret_env</span></label>
+                <div class="env-input">
+                  <span class="env-name">THOUGHT_JWT_SECRET</span>
+                  <span class="lock">
+                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+                      <rect x="4" y="11" width="16" height="10" rx="2"/>
+                      <path d="M8 11V7a4 4 0 0 1 8 0v4"/>
+                    </svg>
+                  </span>
+                </div>
+                <div class="hint">至少 32 字节，如 openssl rand -hex 32</div>
+              </div>
+              <div class="field">
+                <label>令牌有效期（秒）<span class="key">token_ttl_secs</span></label>
+                <input type="number" class="num" value="43200">
+              </div>
+              <div class="field">
+                <label>初始管理员<span class="key">bootstrap_admin.username</span></label>
+                <input type="text" value="admin">
+                <div class="hint">首次启动且无用户时创建</div>
+              </div>
+              <div class="field">
+                <label>管理员密码<span class="key">bootstrap_admin.password_env</span></label>
+                <div class="env-input">
+                  <span class="env-name">THOUGHT_ADMIN_PASSWORD</span>
+                  <span class="lock">
+                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+                      <rect x="4" y="11" width="16" height="10" rx="2"/>
+                      <path d="M8 11V7a4 4 0 0 1 8 0v4"/>
+                    </svg>
+                  </span>
+                </div>
+              </div>
+            </div>
+            <div class="env-note">
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
+                <circle cx="12" cy="12" r="9"/>
+                <path d="M12 8v5M12 16h.01"/>
+              </svg>
+              密钥通过环境变量注入，不会写入配置文件或界面
+            </div>
+          </section>
+
+          <!-- 存储 -->
+          <section class="card">
+            <div class="card-head">
+              <span class="card-title">存储</span>
+              <span class="card-tag">[storage]</span>
+              <span class="right">内嵌 SurrealKV，与记忆库共用文件</span>
+            </div>
+            <div class="fields">
+              <div class="field span2">
+                <label>数据端点<span class="key">endpoint</span></label>
+                <input type="text" value="surrealkv://data/thought">
+              </div>
+              <div class="field">
+                <label>命名空间<span class="key">namespace</span></label>
+                <input type="text" value="thought">
+              </div>
+              <div class="field">
+                <label>数据库<span class="key">database</span></label>
+                <input type="text" value="server">
+              </div>
+            </div>
+          </section>
+
+          <!-- 模型池 -->
+          <section class="card">
+            <div class="card-head">
+              <span class="card-title">模型池</span>
+              <span class="card-tag">[models.*]</span>
+              <span class="right">agent 按名字引用</span>
+            </div>
+
+            <!-- deepseek：展开态 -->
+            <div class="model open">
+              <div class="model-head" onclick="this.parentElement.classList.toggle('open')">
+                <span class="model-name">deepseek</span>
+                <span class="model-meta">deepseek · deepseek-v4-pro</span>
+                <span class="chev">▸</span>
+              </div>
+              <div class="model-body">
+                <div class="fields">
+                  <div class="field">
+                    <label>提供商<span class="key">provider</span></label>
+                    <input type="text" value="deepseek">
+                  </div>
+                  <div class="field">
+                    <label>模型<span class="key">model</span></label>
+                    <input type="text" value="deepseek-v4-pro">
+                  </div>
+                  <div class="field span2">
+                    <label>API 密钥<span class="key">api_key_env</span></label>
+                    <div class="env-input">
+                      <span class="env-name">DEEPSEEK_API_KEY</span>
+                      <span class="lock">
+                        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+                          <rect x="4" y="11" width="16" height="10" rx="2"/>
+                          <path d="M8 11V7a4 4 0 0 1 8 0v4"/>
+                        </svg>
+                      </span>
+                    </div>
+                  </div>
+                  <div class="field">
+                    <label>温度<span class="key">temperature</span></label>
+                    <input type="number" class="num" value="0.7" step="0.1">
+                  </div>
+                  <div class="field">
+                    <label>最大输出 tokens<span class="key">max_tokens</span></label>
+                    <input type="number" class="num" value="8192">
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- deepseek-flash：收起态 -->
+            <div class="model">
+              <div class="model-head" onclick="this.parentElement.classList.toggle('open')">
+                <span class="model-name">deepseek-flash</span>
+                <span class="model-meta">deepseek · deepseek-v4-flash</span>
+                <span class="badge">thinking = false</span>
+                <span class="chev">▸</span>
+              </div>
+              <div class="model-body">
+                <div class="fields">
+                  <div class="field">
+                    <label>提供商<span class="key">provider</span></label>
+                    <input type="text" value="deepseek">
+                  </div>
+                  <div class="field">
+                    <label>模型<span class="key">model</span></label>
+                    <input type="text" value="deepseek-v4-flash">
+                  </div>
+                  <div class="field span2">
+                    <label>API 密钥<span class="key">api_key_env</span></label>
+                    <div class="env-input">
+                      <span class="env-name">DEEPSEEK_API_KEY</span>
+                      <span class="lock">
+                        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+                          <rect x="4" y="11" width="16" height="10" rx="2"/>
+                          <path d="M8 11V7a4 4 0 0 1 8 0v4"/>
+                        </svg>
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <button class="add-model">+ 添加模型</button>
+            <div class="env-note">
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
+                <circle cx="12" cy="12" r="9"/>
+                <path d="M12 8v5M12 16h.01"/>
+              </svg>
+              密钥通过环境变量注入
+            </div>
+          </section>
+
+          <!-- 记忆 -->
+          <section class="card">
+            <div class="card-head">
+              <span class="card-title">记忆</span>
+              <span class="card-tag">[memory]</span>
+              <span class="right">持久化长期记忆</span>
+            </div>
+            <div class="fields">
+              <div class="field">
+                <label>命名空间<span class="key">namespace</span></label>
+                <input type="text" value="thought">
+              </div>
+              <div class="field">
+                <label>数据库<span class="key">database</span></label>
+                <input type="text" value="memory">
+              </div>
+              <div class="field">
+                <label>向量维度<span class="key">embedding_dimension</span></label>
+                <input type="number" class="num" value="1024">
+              </div>
+              <div class="field">
+                <label>三元组抽取模型<span class="key">extractor_model</span></label>
+                <input type="text" value="deepseek-flash">
+              </div>
+              <div class="field">
+                <label>半衰期（小时）<span class="key">half_life_hours</span></label>
+                <input type="number" class="num" value="168">
+                <div class="hint">记忆随时间衰减，检索时按新鲜度加权</div>
+              </div>
+              <div class="field">
+                <label>&nbsp;</label>
+                <div class="switch-row">
+                  <span class="switch on" onclick="this.classList.toggle('on')"></span>
+                  <span class="sw-label">每用户独立记忆空间</span>
+                  <span class="sw-key">per_user</span>
+                </div>
+                <div class="switch-row" style="margin-top:8px;">
+                  <span class="switch" onclick="this.classList.toggle('on')"></span>
+                  <span class="sw-label">自动写入用户消息</span>
+                  <span class="sw-key">save_user_messages</span>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <!-- Agent -->
+          <section class="card">
+            <div class="card-head">
+              <span class="card-title">Agent</span>
+              <span class="card-tag">[agent.*]</span>
+              <span class="right">主控派单 · worker 执行</span>
+            </div>
+
+            <div class="fields" style="margin-bottom:14px;">
+              <div class="field">
+                <label>主控模型<span class="key">controller.model</span></label>
+                <input type="text" value="deepseek">
+                <div class="hint">主控尽量只派单，仅开放记忆工具</div>
+              </div>
+            </div>
+
+            <!-- coder：展开态 -->
+            <div class="model worker open">
+              <div class="model-head" onclick="this.parentElement.classList.toggle('open')">
+                <span class="model-name">coder</span>
+                <span class="model-meta">deepseek</span>
+                <span class="tools-count">tools 4 个</span>
+                <span class="spawn-state yes"><span class="mini-dot"></span>可派生子 agent</span>
+                <span class="chev">▸</span>
+              </div>
+              <div class="model-body">
+                <div class="fields">
+                  <div class="field span2">
+                    <label>职责描述<span class="key">description</span></label>
+                    <textarea rows="2">Writes, reads and modifies code and files; runs shell commands to build and test.</textarea>
+                  </div>
+                  <div class="field span2">
+                    <label>系统提示<span class="key">system</span></label>
+                    <textarea rows="3">You are a careful senior software engineer. Inspect before you change, keep changes minimal, and verify by running the build or tests.</textarea>
+                  </div>
+                  <div class="field span2">
+                    <label>工具<span class="key">tools</span></label>
+                    <div class="tool-chips">
+                      <span class="tchip">read_file</span>
+                      <span class="tchip">write_file</span>
+                      <span class="tchip">delete_file</span>
+                      <span class="tchip">run_command</span>
+                    </div>
+                  </div>
+                  <div class="field">
+                    <div class="switch-row">
+                      <span class="switch on" onclick="this.classList.toggle('on')"></span>
+                      <span class="sw-label">允许派生子 agent</span>
+                      <span class="sw-key">can_spawn</span>
+                    </div>
+                  </div>
+                  <div class="field">
+                    <label>模型<span class="key">model</span></label>
+                    <input type="text" value="deepseek">
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- researcher：收起态 -->
+            <div class="model worker">
+              <div class="model-head" onclick="this.parentElement.classList.toggle('open')">
+                <span class="model-name">researcher</span>
+                <span class="model-meta">deepseek-flash</span>
+                <span class="tools-count">tools 1 个</span>
+                <span class="spawn-state"><span class="mini-dot"></span>不可派生</span>
+                <span class="chev">▸</span>
+              </div>
+              <div class="model-body">
+                <div class="fields">
+                  <div class="field span2">
+                    <label>职责描述<span class="key">description</span></label>
+                    <textarea rows="2">Answers questions by reading files and recalling long-term memory; does not modify anything.</textarea>
+                  </div>
+                  <div class="field span2">
+                    <label>系统提示<span class="key">system</span></label>
+                    <textarea rows="2">You research and summarize. Cite the files or memories you used.</textarea>
+                  </div>
+                  <div class="field span2">
+                    <label>工具<span class="key">tools</span></label>
+                    <div class="tool-chips">
+                      <span class="tchip">read_file</span>
+                    </div>
+                  </div>
+                  <div class="field">
+                    <div class="switch-row">
+                      <span class="switch" onclick="this.classList.toggle('on')"></span>
+                      <span class="sw-label">允许派生子 agent</span>
+                      <span class="sw-key">can_spawn</span>
+                    </div>
+                  </div>
+                  <div class="field">
+                    <label>模型<span class="key">model</span></label>
+                    <input type="text" value="deepseek-flash">
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="card-head" style="margin-top:20px; margin-bottom:12px;">
+              <span class="card-title" style="font-size:12.5px;">限额</span>
+              <span class="card-tag">[agent.limits]</span>
+            </div>
+            <div class="limits">
+              <div class="field">
+                <label>最大并发<span class="key">max_concurrent_tasks</span></label>
+                <input type="number" class="num" value="4">
+              </div>
+              <div class="field">
+                <label>子 agent 轮数<span class="key">subagent_max_turns</span></label>
+                <input type="number" class="num" value="30">
+              </div>
+              <div class="field">
+                <label>输出字符上限<span class="key">max_tool_output_chars</span></label>
+                <input type="number" class="num" value="32768">
+              </div>
+            </div>
+          </section>
+
+        </div>
+
+        <!-- 原始 TOML 视图 -->
+        <div class="toml-view" id="toml-view">
+          <div class="toml-pre"><span class="cm"># 密钥一律通过 *_env 从环境变量读取，不要把明文写进仓库。</span>
+
+<span class="sec">[http]</span>
+<span class="k">bind</span> = "127.0.0.1:8080"
+<span class="k">web_dir</span> = "web"
+
+<span class="sec">[auth]</span>
+<span class="k">jwt_secret_env</span> = "THOUGHT_JWT_SECRET"
+<span class="k">token_ttl_secs</span> = 43200
+
+<span class="sec">[auth.bootstrap_admin]</span>
+<span class="k">username</span> = "admin"
+<span class="k">password_env</span> = "THOUGHT_ADMIN_PASSWORD"
+
+<span class="sec">[storage]</span>
+<span class="k">endpoint</span> = "surrealkv://data/thought"
+<span class="k">namespace</span> = "thought"
+<span class="k">database</span> = "server"
+
+<span class="sec">[models.deepseek]</span>
+<span class="k">provider</span> = "deepseek"
+<span class="k">model</span> = "deepseek-v4-pro"
+<span class="k">api_key_env</span> = "DEEPSEEK_API_KEY"
+
+<span class="sec">[models.deepseek-flash]</span>
+<span class="k">provider</span> = "deepseek"
+<span class="k">model</span> = "deepseek-v4-flash"
+<span class="k">api_key_env</span> = "DEEPSEEK_API_KEY"
+<span class="k">thinking</span> = false
+
+<span class="sec">[memory]</span>
+<span class="k">namespace</span> = "thought"
+<span class="k">database</span> = "memory"
+<span class="k">embedding_dimension</span> = 1024
+<span class="k">extractor_model</span> = "deepseek-flash"
+<span class="k">per_user</span> = true
+<span class="k">save_user_messages</span> = false
+<span class="k">half_life_hours</span> = 168.0
+
+<span class="sec">[agent.controller]</span>
+<span class="k">model</span> = "deepseek"
+<span class="k">tools</span> = []
+
+<span class="sec">[[agent.workers]]</span>
+<span class="k">name</span> = "coder"
+<span class="k">model</span> = "deepseek"
+<span class="k">tools</span> = ["read_file", "write_file", "delete_file", "run_command"]
+<span class="k">can_spawn</span> = true
+
+<span class="sec">[[agent.workers]]</span>
+<span class="k">name</span> = "researcher"
+<span class="k">model</span> = "deepseek-flash"
+<span class="k">tools</span> = ["read_file"]
+<span class="k">can_spawn</span> = false
+
+<span class="sec">[agent.limits]</span>
+<span class="k">max_concurrent_tasks</span> = 4
+<span class="k">subagent_max_turns</span> = 30
+<span class="k">max_tool_output_chars</span> = 32768</div>
+        </div>
+
+      </div>
+    </div>
+  </section>
+
+  <!-- 幕帘：只在切换时扫过内容区，不覆盖 rail -->
+  <div class="curtain" id="curtain"><span class="edge l"></span><span class="edge r"></span></div>
+
+  </div><!-- /stage -->
+</div><!-- /app -->
+
+<script>
+(function () {
+  'use strict';
+  var ORDER = ['home', 'tasks', 'settings'];
+  var D = 680;          /* 幕帘总时长 ms */
+  var COVER = 300;      /* 幕帘完全遮蔽时刻（扫入快） */
+  var FADE_DELAY = 380; /* 新页淡入开始 = 遮蔽 + 80ms（与旧页淡出错开） */
+  var reduced = window.matchMedia('(prefers-reduced-motion: reduce)');
+
+  var body = document.body;
+  var curtain = document.getElementById('curtain');
+  var edgeL = curtain.querySelector('.edge.l');
+  var edgeR = curtain.querySelector('.edge.r');
+  var indicator = document.getElementById('rail-ind');
+  var railItems = Array.prototype.slice.call(document.querySelectorAll('.rail-item'));
+  var pages = {};
+  ORDER.forEach(function (n) { pages[n] = document.querySelector('.page-' + n); });
+
+  var current = 'home';
+  var switching = false;
+
+  function validPage(n) { return ORDER.indexOf(n) !== -1; }
+
+  /* rail 指示条：唯一在切换时滑动的 rail 元素 */
+  function moveIndicator(name, animate) {
+    var item = null;
+    railItems.forEach(function (el) {
+      var on = el.dataset.page === name;
+      el.classList.toggle('active', on);
+      if (on) item = el;
+    });
+    if (!item) return;
+    if (!animate) indicator.classList.add('instant');
+    indicator.style.height = (item.offsetHeight * 0.56) + 'px';
+    indicator.style.transform = 'translateY(' + (item.offsetTop + item.offsetHeight * 0.22) + 'px)';
+    if (!animate) {
+      void indicator.offsetWidth; /* 强制回流后恢复过渡 */
+      indicator.classList.remove('instant');
+    }
+  }
+
+  function activate(name) {
+    ORDER.forEach(function (n) {
+      pages[n].classList.toggle('active', n === name);
+      pages[n].classList.remove('t-out', 't-in');
+    });
+    current = name;
+    if (location.hash !== '#' + name) history.replaceState(null, '', '#' + name);
+  }
+
+  /* 幕帘 + 双页微动的整组动画（freeze 调试复用同一构建函数） */
+  function buildAnims(from, to, dir) {
+    var off = function (v) { return 'translateX(' + (v * dir) + '%)'; };
+    var anims = [];
+    /* 幕帘：扫入快（cubic-bezier(.7,0,.3,1)），遮蔽一拍，扫出稍缓 */
+    anims.push(curtain.animate([
+      { transform: off(-102), offset: 0, easing: 'cubic-bezier(.7,0,.3,1)' },
+      { transform: 'translateX(0%)', offset: 0.44, easing: 'linear' },
+      { transform: 'translateX(0%)', offset: 0.47, easing: 'cubic-bezier(.33,.46,.32,1)' },
+      { transform: off(102), offset: 1 }
+    ], { duration: D, fill: 'both' }));
+    /* 1px 朱红前缘线：扫入在前缘，遮蔽瞬间换到扫出侧 */
+    var lead = dir > 0 ? edgeR : edgeL;
+    var trail = dir > 0 ? edgeL : edgeR;
+    anims.push(lead.animate([
+      { opacity: 1, offset: 0 }, { opacity: 1, offset: 0.45 },
+      { opacity: 0, offset: 0.46 }, { opacity: 0, offset: 1 }
+    ], { duration: D, fill: 'both' }));
+    anims.push(trail.animate([
+      { opacity: 0, offset: 0 }, { opacity: 0, offset: 0.45 },
+      { opacity: 1, offset: 0.46 }, { opacity: 1, offset: 1 }
+    ], { duration: D, fill: 'both' }));
+    /* 幕帘之下：旧页 3px 位移淡出，新页错开 80ms 淡入 */
+    var dx = (3 * dir) + 'px';
+    anims.push(pages[from].animate([
+      { opacity: 1, transform: 'translateX(0)' },
+      { opacity: 0, transform: 'translateX(' + dx + ')' }
+    ], { duration: 280, easing: 'ease-out', fill: 'both' }));
+    anims.push(pages[to].animate([
+      { opacity: 0, transform: 'translateX(' + dx + ')' },
+      { opacity: 1, transform: 'translateX(0)' }
+    ], { duration: 240, delay: FADE_DELAY, easing: 'ease-out', fill: 'both' }));
+    return anims;
+  }
+
+  function transition(to) {
+    if (!validPage(to) || to === current || switching) return;
+    var from = current;
+    if (reduced.matches) { fadeTransition(from, to); return; }
+    switching = true;
+    var dir = ORDER.indexOf(to) > ORDER.indexOf(from) ? 1 : -1;
+    body.classList.add('switching');
+    pages[from].classList.add('t-out');
+    pages[to].classList.add('t-in');
+    var anims = buildAnims(from, to, dir);
+    /* 幕帘遮蔽下换页，rail 指示条此时滑向新页 */
+    setTimeout(function () {
+      pages[from].classList.remove('active');
+      pages[to].classList.add('active');
+      moveIndicator(to, true);
+    }, COVER);
+    setTimeout(function () {
+      anims.forEach(function (a) { a.cancel(); });
+      body.classList.remove('switching');
+      pages[from].classList.remove('t-out');
+      pages[to].classList.remove('t-in');
+      activate(to);
+      switching = false;
+    }, D + 40);
+  }
+
+  /* prefers-reduced-motion：降级为简单淡入淡出，无幕帘无位移 */
+  function fadeTransition(from, to) {
+    switching = true;
+    body.classList.add('switching');
+    pages[from].classList.add('t-out');
+    pages[to].classList.add('t-in');
+    moveIndicator(to, true);
+    var a1 = pages[from].animate([{ opacity: 1 }, { opacity: 0 }], { duration: 220, fill: 'both' });
+    var a2 = pages[to].animate([{ opacity: 0 }, { opacity: 1 }], { duration: 220, fill: 'both' });
+    setTimeout(function () {
+      a1.cancel(); a2.cancel();
+      body.classList.remove('switching');
+      pages[from].classList.remove('t-out');
+      pages[to].classList.remove('t-in');
+      activate(to);
+      switching = false;
+    }, 240);
+  }
+
+  /* 调试：把幕帘过渡冻结在 NN%（?freeze=NN&to=tasks&from=home） */
+  function freeze(from, to, pct) {
+    var dir = ORDER.indexOf(to) > ORDER.indexOf(from) ? 1 : -1;
+    ORDER.forEach(function (n) { pages[n].classList.remove('active'); });
+    body.classList.add('frozen');
+    pages[from].classList.add('t-out');
+    pages[to].classList.add('t-in');
+    var anims = buildAnims(from, to, dir);
+    anims.forEach(function (a) {
+      a.pause();
+      a.currentTime = (pct / 100) * D;
+    });
+    moveIndicator(pct >= 50 ? to : from, false);
+    current = pct >= 50 ? to : from;
+  }
+
+  /* ---- 事件：rail 入口无刷新切换 ---- */
+  railItems.forEach(function (el) {
+    el.addEventListener('click', function () { transition(el.dataset.page); });
+  });
+  window.addEventListener('hashchange', function () {
+    var n = location.hash.slice(1);
+    if (validPage(n)) transition(n);
+  });
+
+  /* ---- 页内交互（与原单页一致，不触发幕帘） ---- */
+  /* 主页：滚动到底部模拟真实会话视角；点击切换会话 */
+  var hs = document.getElementById('home-scroll');
+  hs.scrollTop = hs.scrollHeight;
+  var sessions = document.querySelectorAll('#sessions .session');
+  sessions.forEach(function (s) {
+    s.addEventListener('click', function () {
+      sessions.forEach(function (x) { x.classList.remove('active'); });
+      s.classList.add('active');
+    });
+  });
+  /* 任务页：筛选 tab 切换任务列表 */
+  var tabs = document.querySelectorAll('#task-tabs .tab');
+  var tasks = document.querySelectorAll('#task-list .task');
+  tabs.forEach(function (tab) {
+    tab.addEventListener('click', function () {
+      tabs.forEach(function (t) { t.classList.remove('active'); });
+      tab.classList.add('active');
+      var f = tab.dataset.filter;
+      tasks.forEach(function (t) {
+        t.style.display = (f === 'all' || t.dataset.status === f) ? '' : 'none';
+      });
+    });
+  });
+
+  /* ---- 初始化：hash 直达 / freeze 调试 ---- */
+  var params = new URLSearchParams(location.search);
+  var hashPage = location.hash.slice(1);
+  var initial = validPage(hashPage) ? hashPage : 'home';
+  if (params.has('freeze')) {
+    var pct = Math.min(100, Math.max(0, parseFloat(params.get('freeze')) || 0));
+    var to = validPage(params.get('to')) ? params.get('to') : 'tasks';
+    var from = validPage(params.get('from')) ? params.get('from')
+             : (initial !== to ? initial : 'home');
+    if (from === to) from = 'home';
+    freeze(from, to, pct);
+  } else {
+    activate(initial);
+    moveIndicator(initial, false);
+  }
+})();
+
+/* 设置页：表单 / 原始 TOML 视图切换（与原单页一致） */
+function switchView(v) {
+  var form = document.getElementById('form-view');
+  var toml = document.getElementById('toml-view');
+  var tf = document.getElementById('tab-form');
+  var tt = document.getElementById('tab-toml');
+  if (v === 'toml') {
+    form.style.display = 'none';
+    toml.style.display = 'block';
+    tf.classList.remove('active');
+    tt.classList.add('active');
+  } else {
+    form.style.display = 'block';
+    toml.style.display = 'none';
+    tf.classList.add('active');
+    tt.classList.remove('active');
+  }
+}
+</script>
+</body>
+</html>

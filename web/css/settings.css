@@ -1,0 +1,486 @@
+/* ================================================================
+   settings：设置页（深色科技风）
+   主体逐像素取自 design/app.html 的 .page-settings 部分（含共享深色 token）；
+   增量样式集中在文件末尾「数据接线增量」一节。
+   ================================================================ */
+.page-settings {
+  --bg: #0d0f12;
+  --panel: #13161b;
+  --panel-2: #181c22;
+  --panel-3: #1c212a;
+  --input: #0f1216;
+  --line: #23272e;
+  --line-2: #2d333c;
+  --text: #e8e6e1;
+  --sub: #8a8f98;
+  --faint: #5c6169;
+  --accent: #e0574a;
+  --accent-soft: rgba(224, 87, 74, 0.12);
+  --accent-line: rgba(224, 87, 74, 0.45);
+  --green: #58b08c;
+  --green-soft: rgba(88, 176, 140, 0.10);
+  --green-text: #7ec4a6;
+  --red-text: #e0857c;
+  --gray: #6b7078;
+  --sans: -apple-system, "Inter", "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--sans);
+  font-size: 13.5px;
+  line-height: 1.6;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  /* 注意：设计稿这里写了 position: relative，会顶掉 .page 的 absolute 导致
+     页面被内容撑高、.scroll 永不滚动；实现里保持 .page 的 absolute 定位，
+     ::before 微光以它为定位上下文即可。 */
+}
+/* 顶部极淡径向微光 */
+.page-settings::before {
+  content: "";
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 340px;
+  background: radial-gradient(560px 220px at 42% -60px, rgba(224, 87, 74, 0.05), transparent 70%);
+  pointer-events: none;
+  z-index: 0;
+}
+.page-settings .scroll {
+  flex: 1;
+  overflow-y: auto;
+  padding: 30px 0 80px;
+  position: relative;
+  z-index: 1;
+}
+.page-settings .column { max-width: 760px; margin: 0 auto; padding: 0 28px; }
+
+/* 页头 */
+.page-settings .page-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  margin-bottom: 4px;
+}
+.page-settings .page-title {
+  font-size: 21px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+.page-settings .page-title .path {
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--faint);
+  margin-left: 12px;
+  letter-spacing: 0.02em;
+}
+.page-settings .save-btn {
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  font-family: var(--sans);
+  font-size: 12px;
+  letter-spacing: 0.14em;
+  padding: 7px 22px;
+  cursor: pointer;
+  transition: filter 0.15s ease;
+}
+.page-settings .save-btn:hover { filter: brightness(1.1); }
+.page-settings .head-note {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--faint);
+  letter-spacing: 0.06em;
+  text-align: right;
+  margin-bottom: 18px;
+}
+
+/* 表单 / 原始 TOML 切换 */
+.page-settings .view-tabs {
+  display: inline-flex;
+  border: 1px solid var(--line-2);
+  border-radius: 7px;
+  padding: 2px;
+  background: var(--panel);
+  margin-bottom: 20px;
+}
+.page-settings .view-tab {
+  border: none;
+  background: transparent;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  letter-spacing: 0.14em;
+  color: var(--faint);
+  padding: 5px 16px;
+  border-radius: 5px;
+  cursor: pointer;
+}
+.page-settings .view-tab.active {
+  background: var(--panel-3);
+  color: var(--text);
+}
+
+/* ---------- 分区卡片 ---------- */
+.page-settings .card {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 16px 20px 18px;
+  margin-bottom: 14px;
+}
+.page-settings .card-head {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  padding-bottom: 10px;
+  margin-bottom: 14px;
+  border-bottom: 1px solid var(--line);
+}
+.page-settings .card-title {
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+}
+.page-settings .card-tag {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--faint);
+  letter-spacing: 0.04em;
+}
+.page-settings .card-head .right {
+  margin-left: auto;
+  font-size: 10.5px;
+  color: var(--faint);
+  letter-spacing: 0.03em;
+}
+
+/* ---------- 表单控件 ---------- */
+.page-settings .fields {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px 18px;
+}
+.page-settings .fields .span2 { grid-column: span 2; }
+.page-settings .field label {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  column-gap: 8px;
+  font-size: 11px;
+  color: var(--sub);
+  letter-spacing: 0.04em;
+  margin-bottom: 5px;
+}
+.page-settings .field label .key {
+  font-family: var(--mono);
+  font-size: 9.5px;
+  color: var(--faint);
+  letter-spacing: 0.02em;
+}
+.page-settings .field input[type="text"],
+.page-settings .field input[type="number"],
+.page-settings .field textarea,
+.page-settings .field select {
+  width: 100%;
+  border: 1px solid var(--line-2);
+  border-radius: 6px;
+  background: var(--input);
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--text);
+  padding: 7px 11px;
+  outline: none;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.page-settings .field textarea {
+  font-family: var(--sans);
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--sub);
+  resize: none;
+}
+.page-settings .field input:focus,
+.page-settings .field textarea:focus,
+.page-settings .field select:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+.page-settings .field input.num { width: 110px; }
+.page-settings .field .hint {
+  font-size: 10px;
+  color: var(--faint);
+  margin-top: 4px;
+  letter-spacing: 0.02em;
+}
+
+/* 环境变量值：密钥一律只显示变量名 */
+.page-settings .env-input {
+  display: flex;
+  align-items: center;
+  border: 1px solid var(--line-2);
+  border-radius: 6px;
+  background: var(--input);
+  padding: 7px 11px;
+  gap: 8px;
+}
+.page-settings .env-input .env-name {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--green-text);
+  flex: 1;
+}
+.page-settings .env-input .lock {
+  flex: none;
+  color: var(--faint);
+  display: flex;
+  align-items: center;
+}
+.page-settings .env-note {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--faint);
+  letter-spacing: 0.05em;
+  margin-top: 12px;
+}
+
+/* 开关 */
+.page-settings .switch-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 2px 0;
+}
+.page-settings .switch-row .sw-label {
+  font-size: 11.5px;
+  color: var(--sub);
+}
+.page-settings .switch-row .sw-key {
+  font-family: var(--mono);
+  font-size: 9.5px;
+  color: var(--faint);
+}
+.page-settings .switch {
+  width: 32px; height: 18px;
+  border-radius: 9px;
+  background: var(--line-2);
+  position: relative;
+  cursor: pointer;
+  flex: none;
+  transition: background 0.2s ease;
+}
+.page-settings .switch::after {
+  content: "";
+  position: absolute;
+  top: 2.5px; left: 3px;
+  width: 13px; height: 13px;
+  border-radius: 50%;
+  background: var(--sub);
+  transition: transform 0.2s ease, background 0.2s ease;
+}
+.page-settings .switch.on { background: var(--accent); }
+.page-settings .switch.on::after { transform: translateX(13px); background: #fff; }
+
+/* ---------- 模型池 / worker 卡片 ---------- */
+.page-settings .model {
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  margin-bottom: 8px;
+  overflow: hidden;
+  background: var(--input);
+}
+.page-settings .model-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 9px 14px;
+  cursor: pointer;
+  min-height: 38px;
+}
+.page-settings .model-head:hover { background: var(--panel-2); }
+.page-settings .model.open .model-head { background: var(--panel-2); border-bottom: 1px solid var(--line); }
+.page-settings .model-name {
+  font-family: var(--mono);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text);
+}
+.page-settings .model-meta {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--faint);
+}
+.page-settings .badge {
+  font-family: var(--mono);
+  font-size: 9px;
+  color: var(--accent);
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-line);
+  border-radius: 4px;
+  padding: 1.5px 7px;
+  letter-spacing: 0.05em;
+}
+.page-settings .model-head .chev {
+  margin-left: auto;
+  font-size: 9px;
+  color: var(--faint);
+  transition: transform 0.25s ease;
+}
+.page-settings .model.open .model-head .chev { transform: rotate(90deg); }
+.page-settings .model-body {
+  display: none;
+  padding: 14px 14px 15px;
+}
+.page-settings .model.open .model-body { display: block; }
+
+.page-settings .add-model {
+  display: block;
+  width: 100%;
+  border: 1px dashed var(--line-2);
+  border-radius: 7px;
+  background: transparent;
+  color: var(--faint);
+  font-family: var(--mono);
+  font-size: 10.5px;
+  letter-spacing: 0.16em;
+  padding: 10px 0;
+  cursor: pointer;
+  margin-top: 4px;
+  transition: all 0.15s ease;
+}
+.page-settings .add-model:hover { border-color: var(--accent-line); color: var(--accent); background: var(--accent-soft); }
+
+/* ---------- Agent workers ---------- */
+.page-settings .tools-count {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--faint);
+}
+.page-settings .tool-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 2px; }
+.page-settings .tchip {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--sub);
+  background: var(--panel-3);
+  border: 1px solid var(--line-2);
+  border-radius: 5px;
+  padding: 2px 9px;
+}
+.page-settings .spawn-state {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-left: auto;
+  font-family: var(--mono);
+  font-size: 9.5px;
+  color: var(--faint);
+  letter-spacing: 0.08em;
+}
+.page-settings .spawn-state .mini-dot {
+  width: 5px; height: 5px;
+  border-radius: 50%;
+  background: var(--line-2);
+}
+.page-settings .spawn-state.yes { color: var(--sub); }
+.page-settings .spawn-state.yes .mini-dot { background: var(--accent); }
+.page-settings .model-head .spawn-state + .chev { margin-left: 0; }
+
+/* limits 三栏（底对齐，防标签行数不同导致输入错位） */
+.page-settings .limits {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px 18px;
+  align-items: end;
+}
+.page-settings .limits .field { display: flex; flex-direction: column; }
+.page-settings .limits .field label { flex: 1; align-items: flex-start; }
+
+/* ---------- 原始 TOML 视图 ---------- */
+.page-settings .toml-view { display: none; }
+.page-settings .toml-pre {
+  background: var(--input);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 18px 22px;
+  font-family: var(--mono);
+  font-size: 11.5px;
+  line-height: 1.7;
+  color: #b7bcc4;
+  white-space: pre;
+  overflow-x: auto;
+}
+.page-settings .toml-pre .cm { color: var(--faint); font-style: italic; }
+.page-settings .toml-pre .sec { color: var(--accent); }
+.page-settings .toml-pre .k { color: var(--green-text); }
+
+.page-settings ::selection { background: rgba(224, 87, 74, 0.25); }
+.page-settings .scroll::-webkit-scrollbar { width: 5px; }
+.page-settings .scroll::-webkit-scrollbar-thumb { background: var(--line-2); border-radius: 3px; }
+
+/* ================================================================
+   数据接线增量：只读态 / 骨架占位 / 待后端标注
+   ================================================================ */
+
+/* 禁用保存按钮 */
+.page-settings .save-btn:disabled {
+  background: var(--panel-3);
+  color: var(--faint);
+  cursor: not-allowed;
+}
+.page-settings .save-btn:disabled:hover { filter: none; }
+
+/* 只读输入（真实数据，禁用呈现） */
+.page-settings .field input:disabled,
+.page-settings .field textarea:disabled {
+  color: var(--sub);
+  border-color: var(--line);
+  cursor: default;
+}
+.page-settings .field input:disabled:focus,
+.page-settings .field textarea:disabled:focus {
+  border-color: var(--line);
+  box-shadow: none;
+}
+
+/* 骨架占位：无数据源字段 */
+.page-settings .field input.placeholder,
+.page-settings .env-input.placeholder .env-name {
+  color: var(--faint);
+}
+.page-settings .env-input.placeholder .env-name { font-style: normal; }
+
+/* 待后端标注 */
+.page-settings .pending-note {
+  font-family: var(--mono);
+  font-size: 9.5px;
+  color: var(--faint);
+  letter-spacing: 0.1em;
+}
+.page-settings .add-model:disabled {
+  cursor: not-allowed;
+}
+.page-settings .add-model:disabled:hover {
+  border-color: var(--line-2);
+  color: var(--faint);
+  background: transparent;
+}
+
+/* 开关只读态 */
+.page-settings .switch.readonly { cursor: default; }
+
+/* 403 等卡片级提示 */
+.page-settings .card-note {
+  font-size: 12px;
+  color: var(--faint);
+  letter-spacing: 0.04em;
+  padding: 6px 0 2px;
+}
+
+/* 布局辅助（替代 inline style：服务端 CSP 禁 style 属性） */
+.page-settings .mb14 { margin-bottom: 14px; }
+.page-settings .mt8 { margin-top: 8px; }
+.page-settings .limits-head { margin-top: 20px; margin-bottom: 12px; }
+.page-settings .limits-title { font-size: 12.5px; }

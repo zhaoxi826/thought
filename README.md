@@ -55,6 +55,9 @@ cargo run --release -p thought-core -- thought.toml
 ```
 
 前端：`web/` 是纯静态 SPA（原生 HTML/CSS/ES modules，无构建步骤），由服务器同源托管在 `/`。
+三个页面经左侧 rail 幕帘切换：对话（浅色书斋）、任务（深色科技风，任务数据走
+`js/tasks-store.js` 适配层，持久化待后端任务注册表）、设置（模型池/Agent 只读真实数据，
+其余分区骨架占位待配置 API，契约见 `design/backend-api.md`）。
 `http.web_dir` 默认 `web`；配置里的相对路径（`web_dir`、`surrealkv://` 存储路径）都相对
 配置文件所在目录解析。浏览器打开监听地址即可登录使用。
 
@@ -74,7 +77,7 @@ model/src/    core/（消息、输出、流式、工具定义、错误） provid
 agent/src/    core/（配置、事件、Runner） orchestration/（会话队列、元工具）
 symbol/src/   memory/（store、retrieve、extract、embed、text、tools、types）
 server/src/   core/（auth、db、error、state） routes/（auth、admin、sessions、memory、web）
-web/          css/  js/{lib,views}/
+web/          css/{base,home,tasks,settings}  js/{lib,main,home,tasks-store,tasks,settings}
 ```
 
 ## HTTP 接口
