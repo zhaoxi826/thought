@@ -484,3 +484,13 @@
 .page-settings .mt8 { margin-top: 8px; }
 .page-settings .limits-head { margin-top: 20px; margin-bottom: 12px; }
 .page-settings .limits-title { font-size: 12.5px; }
+
+/* 顶部保存结果 / 校验错误（多行：需重启 / 已热生效） */
+.page-settings .head-note { white-space: pre-line; }
+.page-settings .head-note.is-ok { color: var(--green-text); }
+.page-settings .head-note.is-err { color: var(--red-text); }
+
+/* 编辑态：数值格式不合法 */
+.page-settings .field input[aria-invalid="true"] { border-color: var(--accent); }
+.page-settings .switch:focus-visible,
+.page-settings .model-head:focus-visible { outline: 1px solid var(--accent-line); outline-offset: 2px; }

@@ -66,8 +66,10 @@ impl App {
         let dir = std::env::temp_dir().join(format!("thought-registry-{tag}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
+        // web_dir 用相对路径（相对配置文件目录），覆盖路径还原 / 解析的往返
         let web = concat!(env!("CARGO_MANIFEST_DIR"), "/../web");
-        std::fs::write(dir.join("thought.toml"), config_toml(llm_url, web)).unwrap();
+        std::os::unix::fs::symlink(web, dir.join("web")).unwrap();
+        std::fs::write(dir.join("thought.toml"), config_toml(llm_url, "web")).unwrap();
         let built = server::build_from_file(&dir.join("thought.toml"), plugin::Registry::new()).await.unwrap();
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let base = format!("http://{}", listener.local_addr().unwrap());
@@ -219,6 +221,22 @@ async fn config_read_write_with_etag_and_secrets_preserved() {
         assert!(!text.contains(secret), "secret leaked: {text}");
     }
     assert_eq!(config["agent"]["limits"]["max_concurrent_tasks"], 3);
+    assert_eq!(config["http"]["web_dir"], "web", "shown as written, not resolved");
+
+    // 原样写回：什么都没变
+    let resp = app
+        .http
+        .put(format!("{}/api/config", app.base))
+        .bearer_auth(&token)
+        .header("if-match", &etag)
+        .json(&config)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 200);
+    let noop: Value = resp.json().await.unwrap();
+    assert_eq!(noop["restart_required"], json!([]), "{noop}");
+    assert_eq!(noop["hot_applied"], json!([]), "{noop}");
 
     let (_, toml_text) = app.call("GET", "/api/config?format=toml", &token, None).await;
     let toml_text = toml_text.as_str().unwrap();
@@ -254,6 +272,7 @@ async fn config_read_write_with_etag_and_secrets_preserved() {
     let on_disk = std::fs::read_to_string(app.dir.join("thought.toml")).unwrap();
     assert!(on_disk.contains("sk-ctrl-secret") && on_disk.contains(ADMIN_PASSWORD), "{on_disk}");
     assert!(on_disk.contains("max_concurrent_tasks = 5"), "{on_disk}");
+    assert!(on_disk.contains("web_dir = \"web\""), "relative path kept: {on_disk}");
     assert!(app.dir.join("thought.toml.bak").exists());
     let reparsed: server::ServerConfig = toml::from_str(&on_disk).unwrap();
     assert_eq!(reparsed.http.bind, "127.0.0.1:9999");

@@ -780,3 +780,27 @@
   cursor: pointer;
 }
 .page-tasks .more-btn:hover { color: var(--accent); border-color: var(--accent-line); }
+
+/* 列表底栏「加载更多」（游标分页） */
+.page-tasks .list-foot { align-items: center; }
+.page-tasks .more-btn.foot-more { margin: 0 0 0 10px; padding: 1px 10px; }
+.page-tasks .more-btn:disabled { cursor: default; color: var(--faint); border-color: var(--line-2); }
+
+/* 短暂提示（取消失败等） */
+.page-tasks .toast {
+  position: absolute;
+  right: 24px; bottom: 20px;
+  z-index: 5;
+  background: var(--panel-3);
+  border: 1px solid var(--accent-line);
+  border-radius: 6px;
+  padding: 8px 16px;
+  font-size: 12px;
+  color: var(--red-text);
+  letter-spacing: 0.04em;
+  opacity: 0;
+  transform: translateY(4px);
+  pointer-events: none;
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+.page-tasks .toast.show { opacity: 1; transform: translateY(0); }

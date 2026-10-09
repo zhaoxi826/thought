@@ -12,7 +12,13 @@
 
 ### 1.1 背景与前端现状
 
-现有 API 只有 `GET /api/sessions/{id}/tasks`（仅运行中）和逐会话 SSE
+> **前端已实现（按本节契约）**：`web/js/tasks-store.js` 已切换到注册表——初始 `GET /api/tasks`
+> （第一页 + `status=running` 补齐长任务，列表底栏「加载更多」走 `cursor`）、全局 `GET /api/tasks/events`
+> 一条 SSE（断线重连 / `lagged` 后按注册表对账）、选中任务调 1.3 详情回填活动流并与实时事件去重合并
+> （工具按 `(agent, id)`，文本按该 agent 已落库文本的子串）、`POST …/cancel` 接到取消按钮。
+> 逐会话 SSE 仅保留给对话页当前会话（承载 `reply`/`error`），不再参与任务聚合。下文为改造前的记录。
+
+改造前现有 API 只有 `GET /api/sessions/{id}/tasks`（仅运行中）和逐会话 SSE
 `GET /api/sessions/{id}/events`（无回放）。前端适配层 `web/js/tasks-store.js` 目前的权宜做法：
 
 - 启动时 `GET /api/sessions`，对**每个**会话 `GET /api/sessions/{id}/tasks` 收集运行中任务；
@@ -167,7 +173,14 @@ data: {"session_id":"…","task_id":5,"worker":"coder","result":"…","error":nu
 
 ### 2.1 背景与前端现状
 
-设置页（`web/js/settings.js` + `web/index.html` 骨架）现状：
+> **前端已实现（按本节契约）**：`web/js/settings.js`（+ `settings-form.js`）用 `GET /api/config` 填充全部分区，
+> admin 可编辑，「保存」→ `PUT /api/config`（`If-Match` 回传 ETag，body 为 GET 响应原样 + 修改）；
+> 412 提示并可重新加载，422 显示 `error`，200 按 `restart_required` / `hot_applied` 分行提示（热生效注明仅影响新会话）。
+> 「原始 TOML」读 `?format=toml`（只读）。404 时退回 `/api/models` + `/api/agents` 只读；非 admin 保持只读/受限。
+> 已有密钥的 `*_env` 变量名锁定不可改，仅新增模型可填 `api_key_env`。任务页并发仪表 N 读 `GET /api/agents` 的
+> `limits.max_concurrent_tasks`（按会话计，分子取进行中最多的会话）。下文为改造前的记录。
+
+改造前设置页（`web/js/settings.js` + `web/index.html` 骨架）：
 
 - **模型池卡**：`GET /api/models`（admin；403 显示「仅管理员可见」），只读禁用态呈现；
 - **Agent 卡**：`GET /api/agents`（controller.model + workers 的 description/model/tools/can_spawn），只读；

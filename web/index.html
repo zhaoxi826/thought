@@ -143,9 +143,7 @@
 
         <div class="tasks" id="task-list"></div>
 
-        <div class="list-foot">
-          <span>历史任务暂存于本次会话 · 持久化待后端任务注册表</span>
-        </div>
+        <div class="list-foot" id="task-list-foot"></div>
       </div>
 
       <!-- 详情主区 -->
@@ -162,9 +160,9 @@
 
         <div class="page-head">
           <div class="page-title">设置<span class="path">thought.toml</span></div>
-          <button class="save-btn" id="save-btn" disabled title="配置写回 API 待后端实现（PUT /api/config）">保存</button>
+          <button class="save-btn" id="save-btn" type="button" disabled>保存</button>
         </div>
-        <div class="head-note">部分修改需重启后生效</div>
+        <div class="head-note" id="settings-note" role="status" aria-live="polite">部分修改需重启后生效</div>
 
         <div class="view-tabs">
           <button class="view-tab active" id="tab-form" type="button">表单</button>
@@ -173,37 +171,37 @@
 
         <div id="form-view">
 
-          <!-- 服务：无数据源，骨架占位 -->
+          <!-- 服务：GET /api/config 填充（data-cfg 由 settings.js 接线） -->
           <section class="card">
             <div class="card-head">
               <span class="card-title">服务</span>
               <span class="card-tag">[http]</span>
-              <span class="right pending-note">配置 API 待后端实现</span>
+              <span class="right pending-note" data-note="http"></span>
             </div>
             <div class="fields">
               <div class="field">
                 <label>监听地址<span class="key">bind</span></label>
-                <input type="text" class="placeholder" placeholder="—" disabled>
+                <input type="text" class="placeholder" placeholder="—" disabled data-cfg="http.bind" aria-label="监听地址 bind">
               </div>
               <div class="field">
                 <label>静态前端目录<span class="key">web_dir</span></label>
-                <input type="text" class="placeholder" placeholder="—" disabled>
+                <input type="text" class="placeholder" placeholder="—" disabled data-cfg="http.web_dir" aria-label="静态前端目录 web_dir">
                 <div class="hint">相对进程工作目录，同源托管在 /</div>
               </div>
             </div>
           </section>
 
-          <!-- 认证：无数据源，骨架占位 -->
+          <!-- 认证：密钥只显示 *_env 变量名 -->
           <section class="card">
             <div class="card-head">
               <span class="card-title">认证</span>
               <span class="card-tag">[auth]</span>
-              <span class="right pending-note">配置 API 待后端实现</span>
+              <span class="right pending-note" data-note="auth"></span>
             </div>
             <div class="fields">
               <div class="field">
                 <label>JWT 密钥<span class="key">jwt_secret_env</span></label>
-                <div class="env-input placeholder">
+                <div class="env-input placeholder" data-cfg-env="auth.jwt_secret_env">
                   <span class="env-name">—</span>
                   <span class="lock">
                     <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
@@ -216,16 +214,16 @@
               </div>
               <div class="field">
                 <label>令牌有效期（秒）<span class="key">token_ttl_secs</span></label>
-                <input type="text" class="placeholder" placeholder="—" disabled>
+                <input type="text" class="placeholder" placeholder="—" disabled data-cfg="auth.token_ttl_secs" data-type="int" aria-label="令牌有效期（秒） token_ttl_secs">
               </div>
               <div class="field">
                 <label>初始管理员<span class="key">bootstrap_admin.username</span></label>
-                <input type="text" class="placeholder" placeholder="—" disabled>
+                <input type="text" class="placeholder" placeholder="—" disabled data-cfg="auth.bootstrap_admin.username" aria-label="初始管理员 bootstrap_admin.username">
                 <div class="hint">首次启动且无用户时创建</div>
               </div>
               <div class="field">
                 <label>管理员密码<span class="key">bootstrap_admin.password_env</span></label>
-                <div class="env-input placeholder">
+                <div class="env-input placeholder" data-cfg-env="auth.bootstrap_admin.password_env">
                   <span class="env-name">—</span>
                   <span class="lock">
                     <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
@@ -245,77 +243,77 @@
             </div>
           </section>
 
-          <!-- 存储：无数据源，骨架占位 -->
+          <!-- 存储 -->
           <section class="card">
             <div class="card-head">
               <span class="card-title">存储</span>
               <span class="card-tag">[storage]</span>
-              <span class="right pending-note">配置 API 待后端实现</span>
+              <span class="right pending-note" data-note="storage"></span>
             </div>
             <div class="fields">
               <div class="field span2">
                 <label>数据端点<span class="key">endpoint</span></label>
-                <input type="text" class="placeholder" placeholder="—" disabled>
+                <input type="text" class="placeholder" placeholder="—" disabled data-cfg="storage.endpoint" aria-label="数据端点 endpoint">
               </div>
               <div class="field">
                 <label>命名空间<span class="key">namespace</span></label>
-                <input type="text" class="placeholder" placeholder="—" disabled>
+                <input type="text" class="placeholder" placeholder="—" disabled data-cfg="storage.namespace" aria-label="存储命名空间 namespace">
               </div>
               <div class="field">
                 <label>数据库<span class="key">database</span></label>
-                <input type="text" class="placeholder" placeholder="—" disabled>
+                <input type="text" class="placeholder" placeholder="—" disabled data-cfg="storage.database" aria-label="存储数据库 database">
               </div>
             </div>
           </section>
 
-          <!-- 模型池：真实数据（GET /api/models，admin） -->
+          <!-- 模型池：GET /api/config 的 models（无配置文件时退回 GET /api/models 只读） -->
           <section class="card" id="card-models">
             <div class="card-head">
               <span class="card-title">模型池</span>
               <span class="card-tag">[models.*]</span>
-              <span class="right pending-note">只读 · 写回待配置 API</span>
+              <span class="right pending-note" data-note="models"></span>
             </div>
             <div id="models-body"><div class="card-note">加载中……</div></div>
           </section>
 
-          <!-- 记忆：无数据源，骨架占位 -->
+          <!-- 记忆：memory 为 null 时整卡只读「未启用」 -->
           <section class="card">
             <div class="card-head">
               <span class="card-title">记忆</span>
               <span class="card-tag">[memory]</span>
-              <span class="right pending-note">配置 API 待后端实现</span>
+              <span class="right pending-note" data-note="memory"></span>
             </div>
             <div class="fields">
               <div class="field">
                 <label>命名空间<span class="key">namespace</span></label>
-                <input type="text" class="placeholder" placeholder="—" disabled>
+                <input type="text" class="placeholder" placeholder="—" disabled data-cfg="memory.namespace" aria-label="记忆命名空间 namespace">
               </div>
               <div class="field">
                 <label>数据库<span class="key">database</span></label>
-                <input type="text" class="placeholder" placeholder="—" disabled>
+                <input type="text" class="placeholder" placeholder="—" disabled data-cfg="memory.database" aria-label="记忆数据库 database">
               </div>
               <div class="field">
                 <label>向量维度<span class="key">embedding_dimension</span></label>
-                <input type="text" class="placeholder" placeholder="—" disabled>
+                <input type="text" class="placeholder" placeholder="—" disabled data-cfg="memory.embedding_dimension" data-type="int" aria-label="向量维度 embedding_dimension">
               </div>
               <div class="field">
                 <label>三元组抽取模型<span class="key">extractor_model</span></label>
-                <input type="text" class="placeholder" placeholder="—" disabled>
+                <input type="text" class="placeholder" placeholder="—" disabled data-cfg="memory.extractor_model" data-nullable aria-label="三元组抽取模型 extractor_model">
               </div>
               <div class="field">
                 <label>半衰期（小时）<span class="key">half_life_hours</span></label>
-                <input type="text" class="placeholder" placeholder="—" disabled>
+                <input type="text" class="placeholder" placeholder="—" disabled data-cfg="memory.half_life_hours" data-type="float" aria-label="半衰期（小时） half_life_hours">
                 <div class="hint">记忆随时间衰减，检索时按新鲜度加权</div>
               </div>
               <div class="field">
                 <label>&nbsp;</label>
                 <div class="switch-row">
-                  <span class="switch readonly"></span>
+                  <span class="switch readonly" data-cfg-switch="memory.per_user"></span>
                   <span class="sw-label">每用户独立记忆空间</span>
                   <span class="sw-key">per_user</span>
                 </div>
                 <div class="switch-row mt8">
-                  <span class="switch readonly"></span>
+                  <span class="switch readonly" data-cfg-switch="memory.save_user_messages"></span>
                   <span class="sw-label">自动写入用户消息</span>
                   <span class="sw-key">save_user_messages</span>
                 </div>
@@ -323,32 +321,32 @@
             </div>
           </section>
 
-          <!-- Agent：真实数据（GET /api/agents） -->
+          <!-- Agent：GET /api/config 的 agent（非 admin 退回 GET /api/agents 只读） -->
           <section class="card" id="card-agent">
             <div class="card-head">
               <span class="card-title">Agent</span>
               <span class="card-tag">[agent.*]</span>
-              <span class="right pending-note">只读 · 写回待配置 API</span>
+              <span class="right pending-note" data-note="agent"></span>
             </div>
             <div id="agent-body"><div class="card-note">加载中……</div></div>
 
             <div class="card-head limits-head">
               <span class="card-title limits-title">限额</span>
               <span class="card-tag">[agent.limits]</span>
-              <span class="right pending-note">配置 API 待后端实现</span>
+              <span class="right pending-note" data-note="limits"></span>
             </div>
             <div class="limits">
               <div class="field">
                 <label>最大并发<span class="key">max_concurrent_tasks</span></label>
-                <input type="text" class="placeholder" placeholder="—" disabled>
+                <input type="text" class="placeholder" placeholder="—" disabled data-cfg="agent.limits.max_concurrent_tasks" data-type="int" aria-label="最大并发 max_concurrent_tasks">
               </div>
               <div class="field">
                 <label>子 agent 轮数<span class="key">subagent_max_turns</span></label>
-                <input type="text" class="placeholder" placeholder="—" disabled>
+                <input type="text" class="placeholder" placeholder="—" disabled data-cfg="agent.limits.subagent_max_turns" data-type="int" aria-label="子 agent 轮数 subagent_max_turns">
               </div>
               <div class="field">
                 <label>输出字符上限<span class="key">max_tool_output_chars</span></label>
-                <input type="text" class="placeholder" placeholder="—" disabled>
+                <input type="text" class="placeholder" placeholder="—" disabled data-cfg="agent.limits.max_tool_output_chars" data-type="int" aria-label="输出字符上限 max_tool_output_chars">
               </div>
             </div>
           </section>

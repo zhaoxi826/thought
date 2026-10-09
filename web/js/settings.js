@@ -1,209 +1,271 @@
-// 设置页：三类数据 ——
-//   1. 可真实展示：模型池（GET /api/models，admin；403 → 「仅管理员可见」）、
-//      Agent（GET /api/agents），均为只读呈现（禁用输入态）；
-//   2. 无数据源的分区（服务/认证/存储/记忆/限额）：index.html 里的骨架占位；
-//   3. 「保存」禁用；「原始 TOML」态显示待配置 API 上线提示。
-// 不装假数据。
+// 设置页：GET /api/config 填充全部分区；admin 可编辑，「保存」→ PUT /api/config（If-Match）。
+//
+// 模式：
+//   edit    admin 且服务从配置文件启动：全部分区可编辑（草稿 = GET 响应的深拷贝，原样 PUT 回去；
+//           响应里省略的密钥字段由服务端保留）；
+//   nofile  GET /api/config → 404：退回 GET /api/models + GET /api/agents 只读呈现；
+//   viewer  非 admin（403）：模型池「仅管理员可见」，Agent / 限额来自 GET /api/agents 只读；
+//   error   其他失败：同 viewer 呈现并提示错误。
+// 「原始 TOML」视图：GET /api/config?format=toml，只读（反映已保存的文件，不含未保存修改）。
+// 密钥从不经过前端：只显示 *_env 变量名。表单部件在 js/settings-form.js。
 
-import { api, ApiError } from './lib/api.js';
+import { api, apiRaw, ApiError } from './lib/api.js';
 import { h } from './lib/dom.js';
+import { TasksStore } from './tasks-store.js';
+import { wireInput, wireSwitch, setEnv, renderModels, renderAgent, resetForm } from './settings-form.js';
+
+let mode = 'viewer';
+let loadError = '';
+let etag = null;
+let draft = null;           // 编辑中的配置（edit 模式）
+let dirty = false;
+let saving = false;
+let view = 'form';
+let tomlSeq = 0;
+const invalid = new Set();  // 当前格式不合法的输入框
 
 export const SettingsPage = {
   init() {
-    const tabForm = document.getElementById('tab-form');
-    const tabToml = document.getElementById('tab-toml');
-    tabForm.addEventListener('click', () => switchView('form'));
-    tabToml.addEventListener('click', () => switchView('toml'));
-    document.getElementById('toml-pre').textContent = '待配置 API（GET /api/config）上线后可用';
+    document.getElementById('tab-form').addEventListener('click', () => switchView('form'));
+    document.getElementById('tab-toml').addEventListener('click', () => switchView('toml'));
+    document.getElementById('save-btn').addEventListener('click', save);
+    window.addEventListener('beforeunload', (e) => {
+      if (dirty) { e.preventDefault(); e.returnValue = ''; }
+    });
   },
 
   async start() {
-    loadModels();
-    loadAgents();
+    await load();
   },
 };
 
-function switchView(v) {
-  const form = document.getElementById('form-view');
-  const toml = document.getElementById('toml-view');
-  const tf = document.getElementById('tab-form');
-  const tt = document.getElementById('tab-toml');
-  const toToml = v === 'toml';
-  form.style.display = toToml ? 'none' : 'block';
-  toml.style.display = toToml ? 'block' : 'none';
-  tf.classList.toggle('active', !toToml);
-  tt.classList.toggle('active', toToml);
+// ---------------------------------------------------------------- 加载
+
+async function load({ keepNotice = false } = {}) {
+  try {
+    const resp = await apiRaw('/api/config');
+    etag = resp.headers.get('ETag');
+    draft = await resp.json();
+    mode = 'edit';
+  } catch (e) {
+    draft = null;
+    etag = null;
+    if (e instanceof ApiError && e.status === 403) mode = 'viewer';
+    else if (e instanceof ApiError && e.status === 404) mode = 'nofile';
+    else { mode = 'error'; loadError = e.message; }
+  }
+  dirty = false;
+  invalid.clear();
+  resetForm();
+  if (mode === 'edit') renderEdit();
+  else await renderFallback();
+  paintNotes(keepNotice);
+  paintSave();
+  if (view === 'toml') loadToml();
 }
 
-// ---------------------------------------------------------------- 模型池
+function ctxOf(editable) {
+  return { editable, onChange: markDirty, invalid };
+}
 
-async function loadModels() {
-  const box = document.getElementById('models-body');
+function renderEdit() {
+  const ctx = ctxOf(true);
+  bindStatic(draft, ctx);
+  renderModels(document.getElementById('models-body'), draft.models || (draft.models = {}), ctx);
+  renderAgent(document.getElementById('agent-body'), draft.agent || {}, ctx);
+}
+
+async function renderFallback() {
+  const ctx = ctxOf(false);
+  const modelsBox = document.getElementById('models-body');
+  const agentBox = document.getElementById('agent-body');
+  const [models, agents] = await Promise.allSettled([
+    mode === 'nofile' ? api('/api/models') : Promise.reject(new ApiError(403, 'admin only')),
+    api('/api/agents'),
+  ]);
+  // 只读呈现：limits 取自 GET /api/agents；服务 / 认证 / 存储 / 记忆无数据源，保持占位
+  bindStatic({ agent: { limits: agents.status === 'fulfilled' ? agents.value.limits : null } }, ctx);
+
+  if (models.status === 'fulfilled') renderModels(modelsBox, models.value || {}, ctx);
+  else cardNote(modelsBox, models.reason?.status === 403 ? '仅管理员可见' : `加载失败：${models.reason?.message}`);
+
+  if (agents.status === 'fulfilled') renderAgent(agentBox, agents.value || {}, ctx);
+  else cardNote(agentBox, `加载失败：${agents.reason?.message}`);
+}
+
+function cardNote(box, text) {
+  box.textContent = '';
+  box.append(h('div', { class: 'card-note', text }));
+}
+
+/** index.html 骨架里的静态字段：data-cfg（输入）/ data-cfg-switch（开关）/ data-cfg-env（变量名）。 */
+function bindStatic(cfg, ctx) {
+  const root = document.getElementById('form-view');
+  root.querySelectorAll('[data-cfg]').forEach((el) => {
+    const [obj, prop] = resolve(cfg, el.dataset.cfg);
+    wireInput(el, ctx, obj, prop, { type: el.dataset.type || 'str', nullable: 'nullable' in el.dataset });
+  });
+  root.querySelectorAll('[data-cfg-switch]').forEach((el) => {
+    const [obj, prop] = resolve(cfg, el.dataset.cfgSwitch);
+    wireSwitch(el, ctx, obj, prop);
+  });
+  root.querySelectorAll('[data-cfg-env]').forEach((el) => {
+    const [obj, prop] = resolve(cfg, el.dataset.cfgEnv);
+    setEnv(el, obj ? obj[prop] : null);
+  });
+}
+
+/** "a.b.c" → [cfg.a.b, "c"]；中间节为 null（如 memory 未启用）时 obj 为 null。 */
+function resolve(cfg, path) {
+  const parts = path.split('.');
+  const prop = parts.pop();
+  let obj = cfg;
+  for (const p of parts) obj = obj == null ? null : obj[p];
+  return [obj ?? null, prop];
+}
+
+// ---------------------------------------------------------------- 卡片标注 / 顶部提示 / 保存按钮
+
+/** 卡片头右侧小字。edit 模式下不加标注（生效方式由保存结果给出）。 */
+function noteFor(card) {
+  if (mode === 'edit') return card === 'memory' && draft?.memory == null ? '未启用 · 无 [memory] 节' : '';
+  if (mode === 'nofile') {
+    if (card === 'models' || card === 'agent' || card === 'limits') return '只读 · 服务未从配置文件启动';
+    return '服务未从配置文件启动';
+  }
+  if (card === 'agent' || card === 'limits') return '只读';
+  return mode === 'error' ? '加载失败' : '仅管理员可见';
+}
+
+function paintNotes(keepNotice) {
+  document.querySelectorAll('#form-view [data-note]').forEach((el) => { el.textContent = noteFor(el.dataset.note); });
+  if (keepNotice) return;
+  if (mode === 'error') notice(`配置加载失败：${loadError}`, 'err');
+  else if (mode === 'nofile') notice('服务未从配置文件启动，配置不可读写');
+  else notice('部分修改需重启后生效');
+}
+
+function notice(text, kind) {
+  const el = document.getElementById('settings-note');
+  el.textContent = text;
+  el.classList.toggle('is-err', kind === 'err');
+  el.classList.toggle('is-ok', kind === 'ok');
+}
+
+function markDirty() {
+  if (!dirty) notice('有未保存的修改');
+  dirty = true;
+  paintSave();
+}
+
+function paintSave() {
+  const btn = document.getElementById('save-btn');
+  const can = mode === 'edit' && dirty && !saving;
+  btn.disabled = !can;
+  btn.textContent = saving ? '保存中…' : '保存';
+  btn.title = mode === 'edit'
+    ? (dirty ? '写回 thought.toml（PUT /api/config）' : '没有未保存的修改')
+    : mode === 'viewer' ? '仅管理员可修改配置' : '当前不可写回配置';
+}
+
+// ---------------------------------------------------------------- 保存
+
+async function save() {
+  if (mode !== 'edit' || !dirty || saving) return;
+  for (const el of [...invalid]) if (!el.isConnected) invalid.delete(el);
+  if (invalid.size) {
+    const first = invalid.values().next().value;
+    first.focus();
+    notice(`「${first.getAttribute('aria-label') || '字段'}」不是合法的数值`, 'err');
+    return;
+  }
+  saving = true;
+  paintSave();
   try {
-    const models = await api('/api/models');
-    box.textContent = '';
-    const names = Object.keys(models || {});
-    if (!names.length) {
-      box.append(h('div', { class: 'card-note', text: '模型池为空' }));
-      return;
-    }
-    names.forEach((name, i) => box.append(modelCard(name, models[name], i === 0)));
-    box.append(h('button', {
-      class: 'add-model', type: 'button', disabled: '',
-      title: '待配置写回 API（PUT /api/config）',
-    }, '+ 添加模型'));
-    box.append(envNote('密钥通过环境变量注入'));
+    const res = await api('/api/config', {
+      method: 'PUT',
+      body: draft,
+      headers: etag ? { 'If-Match': etag } : {},
+    });
+    saving = false;
+    await load({ keepNotice: true });
+    notice(savedMessage(res), 'ok');
+    refreshAgents();
   } catch (e) {
-    box.textContent = '';
-    if (e instanceof ApiError && e.status === 403) {
-      box.append(h('div', { class: 'card-note', text: '仅管理员可见' }));
+    saving = false;
+    paintSave();
+    if (e instanceof ApiError && e.status === 412) {
+      notice('配置已被其他人修改，请重新加载后再保存', 'err');
+      if (window.confirm('配置已在别处被修改（412）。\n重新加载最新配置？未保存的修改将丢失。')) await load();
+    } else if (e instanceof ApiError && e.status === 422) {
+      notice(`校验未通过：${e.message}`, 'err');
     } else {
-      box.append(h('div', { class: 'card-note', text: `加载失败：${e.message}` }));
+      notice(`保存失败：${e.message}`, 'err');
     }
   }
 }
 
-function modelCard(name, cfg, open) {
-  const meta = `${cfg.provider || ''} · ${cfg.model || ''}`;
-  const badges = [];
-  if (cfg.thinking === false) badges.push(h('span', { class: 'badge', text: 'thinking = false' }));
-  if (cfg.temperature != null) badges.push(h('span', { class: 'badge', text: `temp ${cfg.temperature}` }));
-
-  const fields = h('div', { class: 'fields' },
-    roField('提供商', 'provider', cfg.provider),
-    roField('模型', 'model', cfg.model),
-    cfg.base_url ? roField('Base URL', 'base_url', cfg.base_url, true) : null,
-    h('div', { class: `field${cfg.base_url ? '' : ' span2'}` },
-      h('label', {}, 'API 密钥', h('span', { class: 'key', text: 'api_key_env' })),
-      cfg.api_key_env
-        ? h('div', { class: 'env-input' },
-            h('span', { class: 'env-name', text: cfg.api_key_env }),
-            lockIcon(),
-          )
-        : h('input', { type: 'text', class: 'placeholder', placeholder: '—', disabled: '' }),
-    ),
-    cfg.temperature != null ? roField('温度', 'temperature', cfg.temperature) : null,
-    cfg.top_p != null ? roField('Top P', 'top_p', cfg.top_p) : null,
-    cfg.max_tokens != null ? roField('最大输出 tokens', 'max_tokens', cfg.max_tokens) : null,
-  );
-
-  const card = h('div', { class: `model${open ? ' open' : ''}` },
-    h('div', {
-      class: 'model-head',
-      onclick() { card.classList.toggle('open'); },
-    },
-      h('span', { class: 'model-name', text: name }),
-      h('span', { class: 'model-meta', text: meta }),
-      ...badges,
-      h('span', { class: 'chev', text: '▸' }),
-    ),
-    h('div', { class: 'model-body' }, fields),
-  );
-  return card;
+function savedMessage(res) {
+  const restart = res?.restart_required || [];
+  const hot = res?.hot_applied || [];
+  const lines = ['已保存到 thought.toml'];
+  if (restart.length) lines.push(`需重启生效：${restart.join('、')}`);
+  if (hot.length) lines.push(`已热生效：${hot.join('、')}（仅对新会话生效，进行中的会话不受影响）`);
+  return lines.join('\n');
 }
 
-// ---------------------------------------------------------------- Agent
+/** 保存后刷新任务页用到的 agent 配置缓存（worker chip / 并发上限）。 */
+async function refreshAgents() {
+  try { TasksStore.setAgents(await api('/api/agents')); } catch { /* 忽略 */ }
+}
 
-async function loadAgents() {
-  const box = document.getElementById('agent-body');
+// ---------------------------------------------------------------- 表单 / 原始 TOML 切换
+
+function switchView(v) {
+  view = v;
+  const toToml = v === 'toml';
+  document.getElementById('form-view').style.display = toToml ? 'none' : 'block';
+  document.getElementById('toml-view').style.display = toToml ? 'block' : 'none';
+  document.getElementById('tab-form').classList.toggle('active', !toToml);
+  document.getElementById('tab-toml').classList.toggle('active', toToml);
+  if (toToml) loadToml();
+}
+
+async function loadToml() {
+  const pre = document.getElementById('toml-pre');
+  const seq = ++tomlSeq;
+  pre.textContent = '加载中……';
+  let text;
   try {
-    const agents = await api('/api/agents');
-    box.textContent = '';
-    box.append(h('div', { class: 'fields mb14' },
-      h('div', { class: 'field' },
-        h('label', {}, '主控模型', h('span', { class: 'key', text: 'controller.model' })),
-        roInput(agents.controller?.model),
-        h('div', { class: 'hint', text: '主控尽量只派单，仅开放记忆工具' }),
-      ),
-    ));
-    (agents.workers || []).forEach((w, i) => box.append(workerCard(w, i === 0)));
+    const resp = await apiRaw('/api/config?format=toml');
+    text = await resp.text();
   } catch (e) {
-    box.textContent = '';
-    box.append(h('div', { class: 'card-note', text: `加载失败：${e.message}` }));
+    if (seq !== tomlSeq) return;
+    if (e instanceof ApiError && e.status === 403) pre.textContent = '仅管理员可见';
+    else if (e instanceof ApiError && e.status === 404) pre.textContent = '服务未从配置文件启动，没有可显示的 thought.toml';
+    else pre.textContent = `加载失败：${e.message}`;
+    return;
   }
+  if (seq !== tomlSeq) return;
+  paintToml(pre, text, dirty);
 }
 
-function workerCard(w, open) {
-  const card = h('div', { class: `model worker${open ? ' open' : ''}` },
-    h('div', {
-      class: 'model-head',
-      onclick() { card.classList.toggle('open'); },
-    },
-      h('span', { class: 'model-name', text: w.name }),
-      h('span', { class: 'model-meta', text: w.model || '' }),
-      h('span', { class: 'tools-count', text: `tools ${(w.tools || []).length} 个` }),
-      h('span', { class: `spawn-state${w.can_spawn ? ' yes' : ''}` },
-        h('span', { class: 'mini-dot' }),
-        w.can_spawn ? '可派生子 agent' : '不可派生',
-      ),
-      h('span', { class: 'chev', text: '▸' }),
-    ),
-    h('div', { class: 'model-body' },
-      h('div', { class: 'fields' },
-        h('div', { class: 'field span2' },
-          h('label', {}, '职责描述', h('span', { class: 'key', text: 'description' })),
-          h('textarea', { rows: '2', disabled: '', text: w.description || '' }),
-        ),
-        h('div', { class: 'field span2' },
-          h('label', {}, '工具', h('span', { class: 'key', text: 'tools' })),
-          h('div', { class: 'tool-chips' },
-            ...(w.tools || []).map((t) => h('span', { class: 'tchip', text: t })),
-          ),
-        ),
-        h('div', { class: 'field' },
-          h('div', { class: 'switch-row' },
-            h('span', { class: `switch readonly${w.can_spawn ? ' on' : ''}` }),
-            h('span', { class: 'sw-label', text: '允许派生子 agent' }),
-            h('span', { class: 'sw-key', text: 'can_spawn' }),
-          ),
-        ),
-        roField('模型', 'model', w.model),
-      ),
-    ),
-  );
-  return card;
-}
-
-// ---------------------------------------------------------------- 小部件
-
-function roInput(value) {
-  return h('input', { type: 'text', disabled: '', value: value ?? '' });
-}
-
-function roField(label, key, value, span2) {
-  return h('div', { class: `field${span2 ? ' span2' : ''}` },
-    h('label', {}, label, h('span', { class: 'key', text: key })),
-    roInput(value),
-  );
-}
-
-function lockIcon() {
-  const span = h('span', { class: 'lock' });
-  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-  svg.setAttribute('width', '11'); svg.setAttribute('height', '11');
-  svg.setAttribute('viewBox', '0 0 24 24'); svg.setAttribute('fill', 'none');
-  svg.setAttribute('stroke', 'currentColor'); svg.setAttribute('stroke-width', '1.8');
-  const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-  rect.setAttribute('x', '4'); rect.setAttribute('y', '11');
-  rect.setAttribute('width', '16'); rect.setAttribute('height', '10'); rect.setAttribute('rx', '2');
-  const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-  path.setAttribute('d', 'M8 11V7a4 4 0 0 1 8 0v4');
-  svg.append(rect, path);
-  span.append(svg);
-  return span;
-}
-
-function envNote(text) {
-  const note = h('div', { class: 'env-note' });
-  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-  svg.setAttribute('width', '11'); svg.setAttribute('height', '11');
-  svg.setAttribute('viewBox', '0 0 24 24'); svg.setAttribute('fill', 'none');
-  svg.setAttribute('stroke', 'currentColor'); svg.setAttribute('stroke-width', '1.6');
-  const c = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-  c.setAttribute('cx', '12'); c.setAttribute('cy', '12'); c.setAttribute('r', '9');
-  const p = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-  p.setAttribute('d', 'M12 8v5M12 16h.01');
-  svg.append(c, p);
-  note.append(svg, document.createTextNode(text));
-  return note;
+/** 轻量高亮：注释 / [节] / 键名。只读。 */
+function paintToml(pre, text, hasDraft) {
+  pre.textContent = '';
+  const head = ['# 只读视图 · 已保存的 thought.toml（密钥字段已省略）'];
+  if (hasDraft) head.push('# 表单中有未保存的修改，此处不包含');
+  for (const line of [...head, '', ...text.split('\n')]) {
+    const trimmed = line.trimStart();
+    if (trimmed.startsWith('#')) {
+      pre.append(h('span', { class: 'cm', text: line }));
+    } else if (/^\[\[?[^\]]+\]\]?\s*(#.*)?$/.test(trimmed)) {
+      pre.append(h('span', { class: 'sec', text: line }));
+    } else {
+      const m = /^(\s*)([A-Za-z0-9_.\-"]+)(\s*=.*)$/.exec(line);
+      if (m) pre.append(m[1], h('span', { class: 'k', text: m[2] }), m[3]);
+      else pre.append(line);
+    }
+    pre.append('\n');
+  }
 }

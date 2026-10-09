@@ -1,24 +1,26 @@
-// 任务页 UI（深色科技风）。数据全部来自 js/tasks-store.js 适配层，
-// 未来后端任务注册表上线后本文件不需要改动。
+// 任务页 UI（深色科技风）。数据全部来自 js/tasks-store.js 适配层（后端任务注册表）；
+// 工具卡渲染在 js/tasks-activity.js。
 
-import { TasksStore, runningByWorker, controllerBusy } from './tasks-store.js';
+import { TasksStore, runningByWorker, controllerBusy, busiestSessionRunning } from './tasks-store.js';
+import { toolEvent, openCards, setRerender } from './tasks-activity.js';
 import { h, fmtClockS, fmtRel, fmtDur, fmtNum } from './lib/dom.js';
 
 let switchPage = () => {};
 let filter = 'all';
 let selectedKey = null;
-const openCards = new Set();     // 展开的工具卡：`${taskKey}:${callId}`
-const closedCards = new Set();   // 被手动收起的默认展开卡（DIFF）
-const expandedOut = new Set();   // 展开全量输出的工具卡
 let renderTimer = null;
+let toastTimer = null;
+const cancelling = new Set();    // 已发出取消请求、等待 task_finished 的任务
 
 const STATUS_LABEL = { running: '进行中', done: '已完成', error: '失败', cancelled: '已取消' };
 const STATUS_META = { running: 'RUN', done: 'OK', error: 'ERR', cancelled: 'CXL' };
 const STATUS_DOT = { running: 'running', done: 'done', error: 'failed', cancelled: 'canceled' };
+const GAUGE_LEN = 56.5;          // 2πr，r = 9
 
 export const TasksPage = {
   init({ switchPage: sp }) {
     switchPage = sp;
+    setRerender(render);
     document.querySelectorAll('#task-tabs .tab').forEach((tab) => {
       tab.addEventListener('click', () => {
         document.querySelectorAll('#task-tabs .tab').forEach((t) => t.classList.remove('active'));
@@ -55,6 +57,7 @@ function render() {
   renderStatusBar(all);
   renderTabs(all);
   renderList(all);
+  renderFoot(all);
   renderDetail();
 }
 
@@ -94,14 +97,20 @@ function renderStatusBar(all) {
   }
   chips.forEach((c) => box.append(c));
 
-  // 并发仪表：N（并发上限）无从得知，先只显示进行中数。
-  // TODO(backend): GET /api/config 上线后读 agent.limits.max_concurrent_tasks 补全 N，见 design/backend-api.md
-  const gauge = h('div', { class: 'gauge', title: '并发上限待后端配置 API（GET /api/config）' },
+  // 并发仪表：N = agent.limits.max_concurrent_tasks（来自 GET /api/agents 的 limits）。
+  // 上限按会话计，分子取进行中任务最多的那个会话；总进行中数见左侧概览。
+  const limit = TasksStore.limits?.max_concurrent_tasks || 0;
+  const inSession = busiestSessionRunning();
+  const frac = limit ? Math.min(inSession / limit, 1) : (running > 0 ? 0.25 : 0);
+  const gauge = h('div', {
+    class: 'gauge',
+    title: limit ? `单会话并发上限 ${limit}（agent.limits.max_concurrent_tasks）` : '并发上限未知',
+  },
     h('svg', { width: '22', height: '22', viewBox: '0 0 24 24', fill: 'none' },
       svgCircle('#343a44', null),
-      running > 0 ? svgCircle('#e0574a', '14.1 56.5') : null,
+      frac > 0 ? svgCircle('#e0574a', `${(GAUGE_LEN * frac).toFixed(1)} ${GAUGE_LEN}`) : null,
     ),
-    h('span', { class: 'gv' }, h('b', {}, String(running))),
+    h('span', { class: 'gv' }, h('b', {}, String(limit ? inSession : running)), limit ? ` / ${limit}` : null),
   );
   box.append(gauge);
 }
@@ -160,7 +169,7 @@ function renderList(all) {
     const item = h('div', {
       class: `task${t.key === selectedKey ? ' selected' : ''}${t.status === 'running' ? ' is-running' : ''}`,
       dataset: { status: t.status },
-      onclick: () => { selectedKey = t.key; render(); },
+      onclick: () => { selectedKey = t.key; TasksStore.ensureDetail(t.key, true); render(); },
     },
       h('span', { class: `sdot ${STATUS_DOT[t.status]}` }),
       h('div', { class: 'task-main' },
@@ -173,6 +182,54 @@ function renderList(all) {
       ),
     );
     box.append(item);
+  }
+}
+
+/** 列表底栏：已载入条数 + 加载更多（游标分页）· 单会话并发。 */
+function renderFoot(all) {
+  const foot = document.getElementById('task-list-foot');
+  if (!foot) return;
+  foot.textContent = '';
+  const left = h('span', { text: `LOADED ${all.length}` });
+  if (TasksStore.hasMore()) {
+    const busy = TasksStore.isLoadingMore();
+    left.append(h('button', {
+      class: 'more-btn foot-more', type: 'button', disabled: busy ? '' : null,
+      onclick() {
+        TasksStore.loadMore().catch((e) => toast(`加载失败：${e.message}`));
+      },
+    }, busy ? '加载中…' : '加载更多'));
+  }
+  const limit = TasksStore.limits?.max_concurrent_tasks;
+  foot.append(left, h('span', { text: `CONCURRENCY ${busiestSessionRunning()}/${limit || '—'}` }));
+}
+
+/** 任务页右下角短暂提示（取消失败等）。 */
+function toast(message) {
+  let el = document.getElementById('tasks-toast');
+  if (!el) {
+    el = h('div', { class: 'toast', id: 'tasks-toast', role: 'status', 'aria-live': 'polite' });
+    document.querySelector('.page-tasks').append(el);
+  }
+  el.textContent = message;
+  el.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove('show'), 4000);
+}
+
+async function cancelTask(t) {
+  if (!window.confirm(`取消任务 ${t.label}？\n「${t.task.slice(0, 80)}」`)) return;
+  cancelling.add(t.key);
+  render();
+  try {
+    await TasksStore.cancel(t.key);
+    // 204：随后由 task_finished { error: "cancelled" } 落定状态
+  } catch (e) {
+    cancelling.delete(t.key);
+    if (e?.status === 409) toast('任务已结束，无法取消');
+    else if (e?.status === 404) toast('任务不存在（可能已被清理）');
+    else toast(`取消失败：${e.message}`);
+    render();
   }
 }
 
@@ -197,6 +254,9 @@ function renderDetail() {
     box.append(h('div', { class: 'detail-empty', text: TasksStore.list().length ? '选择左侧任务查看详情' : '暂无任务' }));
     return;
   }
+  // 回填持久化活动事件（幂等：已加载 / 加载中不重复请求；结束后标 stale 会再拉一次补齐末段）
+  TasksStore.ensureDetail(t.key);
+  if (t.status !== 'running') cancelling.delete(t.key);
   const scroll = box.querySelector('.scroll');
   const keepScroll = scroll ? scroll.scrollTop : 0;
   box.textContent = '';
@@ -233,10 +293,26 @@ function detailHead(t) {
         h('span', { class: 'k', text: 'Tokens' }),
         h('span', { class: 'v', text: fmtNum(t.tokens) }),
       ),
-      // 取消：无 API，禁用态。后端 POST /api/tasks/{task_id}/cancel 落地后放开。
-      h('button', { class: 'cancel', disabled: '', title: '待后端支持（POST /api/tasks/{task_id}/cancel）' }, '取消'),
+      // 取消：POST /api/tasks/{session_id}/{task_id}/cancel；仅进行中可点
+      cancelButton(t),
     ),
   );
+}
+
+function cancelButton(t) {
+  if (t.status !== 'running') {
+    return h('button', { class: 'cancel', type: 'button', disabled: '', title: '任务已结束' }, '取消');
+  }
+  if (cancelling.has(t.key)) {
+    return h('button', { class: 'cancel', type: 'button', disabled: '', title: '已请求取消，等待任务结束' }, '取消中…');
+  }
+  return h('button', { class: 'cancel', type: 'button', onclick: () => cancelTask(t) }, '取消');
+}
+
+function emptyActivityText(t) {
+  if (t.detail === 'loading' || t.detail === 'none') return '加载活动记录……';
+  if (t.detail === 'error') return '活动记录加载失败';
+  return t.status === 'running' ? '等待第一个活动事件……' : '无活动记录';
 }
 
 function detailBody(t) {
@@ -255,7 +331,7 @@ function detailBody(t) {
   );
   const stream = h('div', { class: 'stream' });
   if (!t.events.length) {
-    stream.append(h('div', { class: 'list-empty', text: t.status === 'running' ? '等待第一个活动事件……' : '无活动记录（任务在页面打开前已开始）' }));
+    stream.append(h('div', { class: 'list-empty', text: emptyActivityText(t) }));
   }
   t.events.forEach((ev, i) => stream.append(renderEvent(t, ev, i)));
   col.append(stream);
@@ -309,175 +385,6 @@ function renderEvent(t, ev, idx) {
   }
   // kind === 'tool'
   return toolEvent(t, ev.call, false);
-}
-
-function toolTag(name) {
-  if (name.startsWith('memory_')) return 'MEM';
-  if (name === 'run_command') return 'CMD';
-  if (name === 'write_file' || name === 'edit_file') return 'DIFF';
-  return 'TOOL';
-}
-
-function toolEvent(t, call, nested) {
-  const tag = toolTag(call.name);
-  const running = call.status === 'running';
-  const ev = h('div', { class: `ev${tag === 'DIFF' ? ' key' : ''}${running ? ' live' : ''}` },
-    h('div', { class: 'ev-head' },
-      h('span', { class: 'ev-tag', text: tag }),
-      h('span', { class: 'ev-ts', text: fmtClockS(call.ts) }),
-    ),
-    toolCard(t, call, tag, nested),
-  );
-  return ev;
-}
-
-function toolCard(t, call, tag, nested) {
-  const cardKey = `${t.key}:${call.id}`;
-  const running = call.status === 'running';
-  // DIFF 卡默认展开（设计稿如此），被手动收起后记住；运行中的卡强制展开
-  const open = running || (tag === 'DIFF' ? !closedCards.has(cardKey) : openCards.has(cardKey));
-  const args = parseArgs(call.arguments);
-
-  const right = h('div', { class: 'right' });
-  const ds = diffStat(call.name, args);
-  if (ds) right.append(h('span', { class: 'diffstat' },
-    h('span', { class: 'add', text: `+${ds.add}` }),
-    ds.del ? h('span', { class: 'del', text: `−${ds.del}` }) : null,
-  ));
-  if (running) {
-    right.append(
-      h('span', { class: 'live-tag' }, h('i', {}), h('span', { text: `RUNNING ${fmtDur(Date.now() - call.ts)}`, dataset: { liveSince: String(call.ts) } })),
-      spinSvg(),
-    );
-  } else {
-    right.append(
-      h('span', { class: 'dur', text: call.doneTs ? fmtDur(call.doneTs - call.ts) : '' }),
-      h('span', { class: 'ok', text: '✓' }),
-    );
-  }
-  right.append(h('span', { class: 'chev', text: '▸' }));
-
-  const card = h('div', {
-    class: `tc${open ? ' open' : ''}${running ? ' live' : ''}${nested ? '' : ''}`,
-    onclick(e) {
-      // 点卡片头以外区域（正文）不折叠
-      if (e.target.closest('.tc-body') || e.target.closest('.more-btn')) return;
-      card.classList.toggle('open');
-      if (card.classList.contains('open')) { openCards.add(cardKey); closedCards.delete(cardKey); }
-      else { openCards.delete(cardKey); closedCards.add(cardKey); }
-    },
-  },
-    h('div', { class: 'tc-head' },
-      h('span', { class: 'tool', text: call.name }),
-      h('span', { class: 'target', text: targetOf(call.name, args, call.arguments) }),
-      right,
-    ),
-    h('div', { class: 'tc-body' }, ...toolBody(t, call, args, tag, cardKey)),
-  );
-  return card;
-}
-
-function spinSvg() {
-  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-  svg.setAttribute('class', 'spin');
-  svg.setAttribute('width', '12'); svg.setAttribute('height', '12');
-  svg.setAttribute('viewBox', '0 0 24 24'); svg.setAttribute('fill', 'none');
-  svg.setAttribute('stroke', '#e0574a'); svg.setAttribute('stroke-width', '2.4');
-  svg.setAttribute('stroke-linecap', 'round');
-  const p = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-  p.setAttribute('d', 'M12 3a9 9 0 1 1-9 9');
-  svg.append(p);
-  return svg;
-}
-
-function toolBody(t, call, args, tag, cardKey) {
-  const nodes = [];
-  // DIFF：write_file 的 file_content 按设计稿 diff 视图呈现（全为新增行）；
-  // 没有结构化 diff 时不硬编，退回等宽 pre 展示参数。
-  if (tag === 'DIFF' && args && typeof args.file_content === 'string') {
-    const target = args.file_path || '';
-    nodes.push(h('div', { class: 'mini-label', text: `Content · ${target}` }));
-    nodes.push(diffView(args.file_content));
-  } else {
-    nodes.push(h('div', { class: 'mini-label', text: 'Params' }));
-    nodes.push(codeBlock(prettyArgs(call.arguments, args)));
-  }
-  if (call.output != null) {
-    const isCmd = call.name === 'run_command';
-    nodes.push(h('div', { class: 'mini-label', text: isCmd ? 'Output · Tail' : 'Output' }));
-    nodes.push(outputBlock(call.output, isCmd, cardKey));
-  }
-  return nodes;
-}
-
-/** 大输出：默认截断（run_command 取尾部），点「展开全部」看全量。 */
-function outputBlock(output, tailOnly, cardKey) {
-  const LIMIT = 3000;
-  let text = String(output);
-  let truncated = false;
-  if (!expandedOut.has(cardKey) && text.length > LIMIT) {
-    truncated = true;
-    text = tailOnly ? tail(text, 14) : text.slice(0, LIMIT);
-  } else if (tailOnly && expandedOut.has(cardKey) === false && tailLines(text) > 14) {
-    text = tail(text, 14);
-    truncated = true;
-  }
-  const wrap = h('div', {});
-  wrap.append(codeBlock(text + (truncated ? '\n…' : '')));
-  if (truncated) {
-    wrap.append(h('button', {
-      class: 'more-btn', type: 'button',
-      onclick() { expandedOut.add(cardKey); render(); },
-    }, '展开全部'));
-  }
-  return wrap;
-}
-
-function tail(text, n) {
-  const lines = text.split('\n');
-  return lines.slice(Math.max(0, lines.length - n)).join('\n');
-}
-function tailLines(text) { return text.split('\n').length; }
-
-function codeBlock(text) {
-  return h('div', { class: 'code', text });
-}
-
-/** diff 视图：全部按新增行呈现（write_file 是全量写入）。 */
-function diffView(content) {
-  const box = h('div', { class: 'diff' });
-  content.split('\n').forEach((line, i) => {
-    box.append(h('span', { class: 'dl add' },
-      h('span', { class: 'ln', text: String(i + 1) }),
-      document.createTextNode(`+ ${line}`),
-    ));
-  });
-  return box;
-}
-
-function diffStat(name, args) {
-  if ((name === 'write_file' || name === 'edit_file') && args && typeof args.file_content === 'string') {
-    return { add: args.file_content.split('\n').length, del: 0 };
-  }
-  return null;
-}
-
-function parseArgs(raw) {
-  try { return JSON.parse(raw); } catch { return null; }
-}
-
-function prettyArgs(raw, parsed) {
-  if (!parsed) return String(raw ?? '');
-  return JSON.stringify(parsed, null, 2);
-}
-
-function targetOf(name, args, raw) {
-  if (args) {
-    const v = args.file_path ?? args.command ?? args.query ?? args.task ?? args.content ?? args.file_content;
-    if (typeof v === 'string') return v.length > 80 ? `${v.slice(0, 80)}…` : v;
-  }
-  const s = String(raw ?? '');
-  return s.length > 80 ? `${s.slice(0, 80)}…` : s;
 }
 
 function resultCard(t) {

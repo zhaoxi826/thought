@@ -47,9 +47,20 @@ export function setUnauthorizedHandler(fn) {
  * 请求 API。成功返回解析后的 JSON（204 返回 null）。
  * 401 时清除登录态并触发全局回登录页（skip401 可跳过，登录接口用）。
  */
-export async function api(path, { method = 'GET', body, skip401 = false } = {}) {
+export async function api(path, opts = {}) {
+  const resp = await apiRaw(path, opts);
+  if (resp.status === 204) return null;
+  const text = await resp.text();
+  return text ? JSON.parse(text) : null;
+}
+
+/**
+ * 底层请求：错误处理同 api()，成功时返回原始 Response（需要读响应头 / 纯文本时用）。
+ * headers 为额外请求头（如 If-Match）。
+ */
+export async function apiRaw(path, { method = 'GET', body, headers: extra = {}, skip401 = false } = {}) {
   const auth = loadAuth();
-  const headers = {};
+  const headers = { ...extra };
   if (auth) headers['Authorization'] = `Bearer ${auth.token}`;
   if (body !== undefined) headers['Content-Type'] = 'application/json';
 
@@ -72,7 +83,5 @@ export async function api(path, { method = 'GET', body, skip401 = false } = {}) 
     } catch { /* 非 JSON 响应 */ }
     throw new ApiError(resp.status, message);
   }
-  if (resp.status === 204) return null;
-  const text = await resp.text();
-  return text ? JSON.parse(text) : null;
+  return resp;
 }

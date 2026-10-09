@@ -143,6 +143,8 @@ pub fn apply(state: &AppState, if_match: Option<&str>, body: Json) -> Result<App
 
     let unprocessable = |m: String| ApiError::new(StatusCode::UNPROCESSABLE_ENTITY, m);
     let mut new: ServerConfig = serde_json::from_value(body).map_err(|e| unprocessable(e.to_string()))?;
+    // GET 展示的是相对路径，这里解析回与运行时一致的绝对路径再比较
+    new.resolve_paths(&crate::config::config_dir(path));
     preserve_secrets(&mut new, &current);
 
     // 语义校验
