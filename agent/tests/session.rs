@@ -269,6 +269,7 @@ async fn session_tools_and_history_sink() {
             history: vec![Message::system("stale"), Message::user("earlier"), Message::assistant("ok")],
             tools: session_tools,
             sink: Some(recorder.clone()),
+            ..Default::default()
         },
     );
     let mut events = session.subscribe();
@@ -286,4 +287,55 @@ async fn session_tools_and_history_sink() {
     assert!(matches!(&saved[0], Message::System { .. }));
     assert_eq!(saved.last().unwrap(), &Message::assistant("sunny today"));
     assert_eq!(saved.len(), 7, "system, 2 restored, user, assistant(tool), tool, assistant");
+}
+
+/// 无损观察者：记录全部事件。
+#[derive(Default)]
+struct Observed(std::sync::Mutex<Vec<(String, AgentEvent)>>);
+
+impl agent::EventObserver for Observed {
+    fn observe(&self, session_id: &str, event: &AgentEvent) {
+        self.0.lock().unwrap().push((session_id.to_owned(), event.clone()));
+    }
+}
+
+#[tokio::test]
+async fn observer_sees_all_events_and_external_cancel_works() {
+    let llm = MockLlm::start(vec![(
+        "ctrl",
+        vec![
+            tool_reply(&[("d1", "dispatch_task", r#"{"worker":"researcher","task":"slow"}"#)]),
+            text_reply("dispatched"),
+            text_reply("noted the cancel"),
+        ],
+    )])
+    .await;
+    // worker 脚本为空：请求会 500，但我们在它结束前就取消
+    let system = system(&llm.url, config()).unwrap();
+    let observed = Arc::new(Observed::default());
+    let session = system.start_session(
+        "s9",
+        SessionOptions {
+            observer: Some(observed.clone()),
+            first_task_id: 42,
+            ..Default::default()
+        },
+    );
+    let mut events = session.subscribe();
+    session.send_user("go");
+    let started = wait_for(&mut events, |e| matches!(e, AgentEvent::TaskStarted { .. })).await;
+    assert!(matches!(started, AgentEvent::TaskStarted { task_id: 42, .. }), "ids continue from first_task_id");
+
+    // 竞态：任务可能已因 500 结束；两种结果都必须有 TaskFinished
+    let cancelled = session.cancel_task(42);
+    let finished = wait_for(&mut events, |e| matches!(e, AgentEvent::TaskFinished { .. })).await;
+    if cancelled {
+        assert!(matches!(finished, AgentEvent::TaskFinished { error: Some(ref e), .. } if e == "cancelled"));
+    }
+    assert!(!session.cancel_task(42), "second cancel is a no-op");
+
+    let seen = observed.0.lock().unwrap();
+    assert!(seen.iter().all(|(sid, _)| sid == "s9"));
+    assert!(seen.iter().any(|(_, e)| matches!(e, AgentEvent::TaskStarted { task_id: 42, .. })));
+    assert!(seen.iter().any(|(_, e)| matches!(e, AgentEvent::TaskFinished { task_id: 42, .. })));
 }

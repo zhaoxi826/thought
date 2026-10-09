@@ -75,6 +75,14 @@ impl ServerConfig {
     }
 }
 
+/// 配置文件所在目录（`thought.toml` → `.`）。
+pub fn config_dir(path: &Path) -> PathBuf {
+    path.parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .unwrap_or(Path::new("."))
+        .to_path_buf()
+}
+
 /// `surrealkv://relative/path` → `surrealkv://<base>/relative/path`；其他协议不动。
 fn resolve_endpoint(endpoint: &mut String, base: &Path) {
     const SCHEME: &str = "surrealkv://";

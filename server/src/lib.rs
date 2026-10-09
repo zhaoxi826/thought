@@ -46,17 +46,38 @@ pub struct Built {
 /// 按配置组装后端。`tools` 是可供 agent 使用的真实工具池（文件、命令等）。
 ///
 /// 配置里的相对路径（如 `http.web_dir`）按进程工作目录解析；从配置文件加载时
-/// 先调用 [`ServerConfig::resolve_paths`] 改为相对配置文件所在目录。
+/// 用 [`build_from_file`]，它会改为相对配置文件所在目录，并启用配置读写接口。
 pub async fn build(config: &ServerConfig, tools: Registry) -> Result<Built, BuildError> {
-    let jwt_secret = secret(&config.auth.jwt_secret, &config.auth.jwt_secret_env)
-        .ok_or_else(|| BuildError("auth: jwt_secret / jwt_secret_env is not set".into()))?;
-    let jwt = Jwt::new(jwt_secret.as_bytes(), config.auth.token_ttl_secs).map_err(|e| fail("auth", e))?;
+    build_inner(config, None, tools).await
+}
 
-    // 模型池
+/// 从配置文件组装：解析相对路径，并让 `GET/PUT /api/config` 可读写该文件。
+pub async fn build_from_file(path: &std::path::Path, tools: Registry) -> Result<Built, BuildError> {
+    let text = std::fs::read_to_string(path).map_err(|e| fail(&format!("read {}", path.display()), e))?;
+    let mut config: ServerConfig = toml::from_str(&text).map_err(|e| fail(&format!("parse {}", path.display()), e))?;
+    config.resolve_paths(&config::config_dir(path));
+    build_inner(&config, Some(path.to_path_buf()), tools).await
+}
+
+/// 由配置构造模型池 + agent 系统（启动与配置热更新共用）。
+pub(crate) fn build_agents(config: &ServerConfig, tools: &Registry) -> Result<AgentSystem, BuildError> {
     let mut models: HashMap<String, Model> = HashMap::new();
     for (name, cfg) in &config.models {
         models.insert(name.clone(), cfg.build().map_err(|e| fail(&format!("model {name}"), e))?);
     }
+    AgentSystem::new(config.agent.clone(), models, tools.clone()).map_err(|e| fail("agent", e))
+}
+
+async fn build_inner(
+    config: &ServerConfig,
+    config_path: Option<std::path::PathBuf>,
+    tools: Registry,
+) -> Result<Built, BuildError> {
+    let jwt_secret = secret(&config.auth.jwt_secret, &config.auth.jwt_secret_env)
+        .ok_or_else(|| BuildError("auth: jwt_secret / jwt_secret_env is not set".into()))?;
+    let jwt = Jwt::new(jwt_secret.as_bytes(), config.auth.token_ttl_secs).map_err(|e| fail("auth", e))?;
+
+    let agents = build_agents(config, &tools)?;
 
     // 存储：后端与记忆库共用一个连接（同一 SurrealKV 文件只能打开一次）
     let conn = surrealdb::engine::any::connect(config.storage.endpoint.as_str())
@@ -66,6 +87,9 @@ pub async fn build(config: &ServerConfig, tools: Registry) -> Result<Built, Buil
         .await
         .map_err(|e| fail("storage", e))?;
     bootstrap_admin(config, &db).await?;
+    let tasks = core::tasks::TaskRegistry::new(&conn, &config.storage.namespace, &config.storage.database)
+        .await
+        .map_err(|e| fail("storage", e))?;
 
     // 记忆器
     let memory = match &config.memory {
@@ -82,10 +106,13 @@ pub async fn build(config: &ServerConfig, tools: Registry) -> Result<Built, Buil
             let extractor: Option<Arc<dyn Extractor>> = match &section.extractor_model {
                 None => None,
                 Some(name) => {
-                    let model = models
+                    let model = config
+                        .models
                         .get(name)
-                        .ok_or_else(|| BuildError(format!("memory: unknown extractor_model {name:?}")))?;
-                    Some(Arc::new(LlmExtractor::new(model.clone())))
+                        .ok_or_else(|| BuildError(format!("memory: unknown extractor_model {name:?}")))?
+                        .build()
+                        .map_err(|e| fail(&format!("model {name}"), e))?;
+                    Some(Arc::new(LlmExtractor::new(model)))
                 }
             };
             let store = MemoryStore::with_connection(&conn, section.store.clone(), embedder, extractor)
@@ -95,8 +122,7 @@ pub async fn build(config: &ServerConfig, tools: Registry) -> Result<Built, Buil
         }
     };
 
-    let agents = AgentSystem::new(config.agent.clone(), models, tools).map_err(|e| fail("agent", e))?;
-    let state = AppState::new(config, db, agents, memory, jwt);
+    let state = AppState::new(config, config_path, db, tasks, agents, tools, memory, jwt);
     Ok(Built {
         router: routes::router(state.clone()),
         state,
@@ -137,7 +163,7 @@ pub fn spawn_memory_worker(state: AppState, interval: Duration) -> tokio::task::
 
 /// 对所有记忆空间跑一轮：抽取至多 32 条待处理段落，然后衰减维护。
 pub async fn maintain_spaces(state: &AppState) -> Result<(), String> {
-    let Some(cfg) = &state.inner.memory_cfg else {
+    let Some(cfg) = state.memory_cfg() else {
         return Ok(());
     };
     let owners: Vec<String> = if cfg.per_user {

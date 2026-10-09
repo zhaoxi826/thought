@@ -1,14 +1,16 @@
 //! 运行时共享状态。
 
-use crate::core::auth::Jwt;
 use crate::config::{MemorySection, ServerConfig};
+use crate::core::auth::Jwt;
 use crate::core::db::Db;
 use crate::core::error::ApiError;
+use crate::core::tasks::TaskRegistry;
 use agent::{AgentSystem, HistorySink, SessionHandle, SessionOptions};
-use model::{Message, ModelConfig};
+use model::Message;
 use plugin::Registry;
-use std::collections::{BTreeMap, HashMap};
-use std::sync::Arc;
+use std::collections::HashMap;
+use std::path::PathBuf;
+use std::sync::{Arc, RwLock};
 use symbol::MemoryStore;
 use tokio::sync::Mutex;
 
@@ -21,14 +23,20 @@ pub struct AppState {
 
 pub(crate) struct Inner {
     pub db: Db,
-    pub agents: AgentSystem,
+    pub tasks: TaskRegistry,
+    /// agent 系统（可热替换：配置写回后新会话使用新系统，进行中的会话不受影响）。
+    pub agents: RwLock<AgentSystem>,
+    /// 构造 agent 系统用的真实工具池（热替换时复用）。
+    pub tools: Registry,
+    /// 当前生效的配置（含明文密钥，只在服务端内部使用）。
+    pub config: RwLock<ServerConfig>,
+    /// 配置文件路径；`None` 表示不是从文件启动，配置接口不可用。
+    pub config_path: Option<PathBuf>,
     /// 记忆库根（按用户 scoped 前的那个）。
     pub memory: Option<MemoryStore>,
-    pub memory_cfg: Option<MemorySection>,
-    /// 模型配置（只读展示用，密钥不会被序列化）。
-    pub models: BTreeMap<String, ModelConfig>,
+    pub memory_cfg: RwLock<Option<MemorySection>>,
     /// 静态前端目录（SPA 兜底服务）。
-    pub web_dir: std::path::PathBuf,
+    pub web_dir: PathBuf,
     /// 活跃会话：session id → 句柄。
     pub sessions: Mutex<HashMap<String, LiveSession>>,
 }
@@ -57,25 +65,50 @@ impl HistorySink for DbSink {
 }
 
 impl AppState {
-    pub fn new(
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn new(
         config: &ServerConfig,
+        config_path: Option<PathBuf>,
         db: Db,
+        tasks: TaskRegistry,
         agents: AgentSystem,
+        tools: Registry,
         memory: Option<MemoryStore>,
         jwt: Jwt,
     ) -> Self {
         Self {
             inner: Arc::new(Inner {
                 db,
-                agents,
+                tasks,
+                agents: RwLock::new(agents),
+                tools,
+                config: RwLock::new(config.clone()),
+                config_path,
                 memory,
-                memory_cfg: config.memory.clone(),
-                models: config.models.clone(),
+                memory_cfg: RwLock::new(config.memory.clone()),
                 web_dir: config.http.web_dir.clone(),
                 sessions: Mutex::new(HashMap::new()),
             }),
             jwt: Arc::new(jwt),
         }
+    }
+
+    /// 当前生效配置的快照（含明文密钥，勿直接输出给客户端）。
+    pub fn config(&self) -> ServerConfig {
+        self.inner.config.read().expect("config lock poisoned").clone()
+    }
+
+    /// 当前 agent 系统的快照。
+    pub(crate) fn agents(&self) -> AgentSystem {
+        self.inner.agents.read().expect("agents lock poisoned").clone()
+    }
+
+    pub(crate) fn memory_cfg(&self) -> Option<MemorySection> {
+        self.inner.memory_cfg.read().expect("memory cfg lock poisoned").clone()
+    }
+
+    pub(crate) fn tasks(&self) -> &TaskRegistry {
+        &self.inner.tasks
     }
 
     pub(crate) fn db(&self) -> &Db {
@@ -84,7 +117,7 @@ impl AppState {
 
     /// 用户的记忆空间（`per_user` 时每人一个 database）。
     pub(crate) async fn memory_for(&self, user_id: &str) -> Result<Option<MemoryStore>, ApiError> {
-        let (Some(root), Some(cfg)) = (&self.inner.memory, &self.inner.memory_cfg) else {
+        let (Some(root), Some(cfg)) = (&self.inner.memory, self.memory_cfg()) else {
             return Ok(None);
         };
         if cfg.per_user {
@@ -109,12 +142,17 @@ impl AppState {
         if let Some(memory) = self.memory_for(owner).await? {
             symbol::register_memory_tools(&mut tools, memory, &format!("chat:{id}"));
         }
-        let handle = self.inner.agents.start_session(
+        let registry = self.tasks();
+        registry.register_session(id, owner);
+        let first_task_id = registry.max_task_id(id).await? + 1;
+        let handle = self.agents().start_session(
             id,
             SessionOptions {
                 history,
                 tools,
                 sink: Some(Arc::new(DbSink(self.db().clone()))),
+                observer: Some(Arc::new(registry.clone())),
+                first_task_id,
             },
         );
         sessions.insert(
@@ -125,6 +163,12 @@ impl AppState {
             },
         );
         Ok(handle)
+    }
+
+    /// 已在运行的会话句柄（不会唤醒 / 恢复会话）。
+    pub(crate) async fn live_session(&self, owner: &str, id: &str) -> Option<SessionHandle> {
+        let sessions = self.inner.sessions.lock().await;
+        sessions.get(id).filter(|l| l.owner == owner).map(|l| l.handle.clone())
     }
 
     /// 关闭会话：丢弃句柄，主控循环随之结束、运行中的任务被取消。

@@ -7,7 +7,12 @@
 //! | GET | /api/me | 当前用户 |
 //! | GET/POST | /api/users | 列出 / 创建用户（admin） |
 //! | GET | /api/models | 模型配置（admin，不含密钥） |
-//! | GET | /api/agents | 主控与 worker 定义 |
+//! | GET | /api/agents | 主控与 worker 定义（含 system、limits） |
+//! | GET/PUT | /api/config | 读取（ETag，脱敏）/ 写回配置（admin，If-Match） |
+//! | GET | /api/tasks | 全局任务列表（含历史，游标分页） |
+//! | GET | /api/tasks/events | 全局任务事件流（SSE） |
+//! | GET | /api/tasks/{sid}/{tid} | 任务详情（含活动事件） |
+//! | POST | /api/tasks/{sid}/{tid}/cancel | 取消任务 |
 //! | GET/POST | /api/sessions | 列出 / 新建会话 |
 //! | GET/DELETE | /api/sessions/{id} | 会话详情（含历史） / 删除 |
 //! | POST | /api/sessions/{id}/messages | 发送消息（202，结果走事件流） |
@@ -21,6 +26,7 @@ mod admin;
 mod auth;
 mod memory;
 mod sessions;
+mod tasks;
 mod web;
 
 use crate::core::state::AppState;
@@ -39,6 +45,11 @@ pub fn router(state: AppState) -> Router {
         .route("/api/users", get(admin::list_users).post(admin::create_user))
         .route("/api/models", get(admin::list_models))
         .route("/api/agents", get(admin::list_agents))
+        .route("/api/config", get(admin::get_config).put(admin::put_config))
+        .route("/api/tasks", get(tasks::list_tasks))
+        .route("/api/tasks/events", get(tasks::task_events))
+        .route("/api/tasks/{session_id}/{task_id}", get(tasks::get_task))
+        .route("/api/tasks/{session_id}/{task_id}/cancel", post(tasks::cancel_task))
         .route("/api/sessions", get(sessions::list_sessions).post(sessions::create_session))
         .route("/api/sessions/{id}", get(sessions::get_session).delete(sessions::delete_session))
         .route("/api/sessions/{id}/messages", post(sessions::send_message))

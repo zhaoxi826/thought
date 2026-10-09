@@ -36,7 +36,8 @@ fn runner(url: &str, max_turns: usize) -> (Runner, broadcast::Receiver<AgentEven
     let mut registry = Registry::new();
     registry.register(Arc::new(Echo));
     let model = Model::OpenAi(OpenAiModel::new(url, "sk-test", OpenAiArgs::openai("m")));
-    let (tx, rx) = broadcast::channel(64);
+    let tx = agent::EventSender::new(64);
+    let rx = tx.subscribe();
     (Runner::new("tester", model, registry, max_turns, 12, tx), rx)
 }
 

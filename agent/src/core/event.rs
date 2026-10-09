@@ -73,6 +73,48 @@ impl From<Usage> for UsageView {
     }
 }
 
-/// 事件出口。用 broadcast：可以有多个订阅者（多个前端标签页），
-/// 没有订阅者时发送静默丢弃。
-pub type EventSender = tokio::sync::broadcast::Sender<AgentEvent>;
+/// 无损事件观察者：同步回调，每个事件都会送达（不像 broadcast 会因慢消费者丢失）。
+/// 用于持久化（任务注册表）等不能丢事件的场景；实现必须快速返回、不得阻塞。
+pub trait EventObserver: Send + Sync {
+    fn observe(&self, session_id: &str, event: &AgentEvent);
+}
+
+/// 事件出口：broadcast 给实时订阅者（多个前端标签页，没有订阅者时静默丢弃），
+/// 同时同步交给可选的无损观察者。`Clone` 廉价。
+#[derive(Clone)]
+pub struct EventSender {
+    session_id: std::sync::Arc<str>,
+    broadcast: tokio::sync::broadcast::Sender<AgentEvent>,
+    observer: Option<std::sync::Arc<dyn EventObserver>>,
+}
+
+impl EventSender {
+    /// 只有 broadcast、没有观察者（单独使用 `Runner` 时）。
+    pub fn new(capacity: usize) -> Self {
+        Self::with_observer("", capacity, None)
+    }
+
+    pub fn with_observer(
+        session_id: &str,
+        capacity: usize,
+        observer: Option<std::sync::Arc<dyn EventObserver>>,
+    ) -> Self {
+        let (broadcast, _) = tokio::sync::broadcast::channel(capacity);
+        Self {
+            session_id: session_id.into(),
+            broadcast,
+            observer,
+        }
+    }
+
+    pub fn send(&self, event: AgentEvent) {
+        if let Some(observer) = &self.observer {
+            observer.observe(&self.session_id, &event);
+        }
+        let _ = self.broadcast.send(event);
+    }
+
+    pub fn subscribe(&self) -> tokio::sync::broadcast::Receiver<AgentEvent> {
+        self.broadcast.subscribe()
+    }
+}

@@ -93,7 +93,7 @@ pub(super) async fn send_message(
     }
     let handle = state.session(&user.sub, &id).await?;
 
-    if let Some(cfg) = &state.inner.memory_cfg
+    if let Some(cfg) = state.memory_cfg()
         && cfg.save_user_messages
         && let Some(memory) = state.memory_for(&user.sub).await?
     {

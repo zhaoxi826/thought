@@ -105,8 +105,7 @@ impl Runner {
     }
 
     pub(crate) fn emit(&self, event: AgentEvent) {
-        // 没有订阅者时发送失败，属正常情况
-        let _ = self.events.send(event);
+        self.events.send(event);
     }
 }
 

@@ -11,7 +11,7 @@
 //! 已积压的输入一次性取出合并处理，避免逐条触发模型调用。
 
 use crate::core::config::{AgentConfig, WorkerSpec};
-use crate::core::event::{AgentEvent, EventSender};
+use crate::core::event::{AgentEvent, EventObserver, EventSender};
 use crate::core::runner::Runner;
 use crate::orchestration::tools::{controller_registry, worker_registry};
 use crate::AgentError;
@@ -22,6 +22,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::sync::{broadcast, mpsc};
+
 use tokio::task::AbortHandle;
 use tracing::warn;
 
@@ -81,6 +82,13 @@ pub struct SessionOptions {
     pub tools: Registry,
 
     pub sink: Option<Arc<dyn HistorySink>>,
+
+    /// 无损事件观察者（如任务注册表）；收到本会话的全部事件。
+    pub observer: Option<Arc<dyn EventObserver>>,
+
+    /// 任务 id 起点（恢复会话时传入已用过的最大 id + 1，保证会话内 id 不重复）。
+    /// 0 视为 1。
+    pub first_task_id: u64,
 }
 
 /// 一个正在运行的任务的概况。
@@ -153,15 +161,21 @@ impl AgentSystem {
     /// 所有句柄被丢弃后会话结束，仍在运行的任务一并取消。
     pub fn start_session(&self, session_id: impl Into<String>, options: SessionOptions) -> SessionHandle {
         let session_id = session_id.into();
-        let SessionOptions { history, tools, sink } = options;
+        let SessionOptions {
+            history,
+            tools,
+            sink,
+            observer,
+            first_task_id,
+        } = options;
         let (inbox, rx) = mpsc::unbounded_channel();
-        let (events, _) = broadcast::channel(1024);
+        let events = EventSender::with_observer(&session_id, 1024, observer);
         let shared = Arc::new(Session {
             system: Arc::clone(&self.inner),
             session_id,
             inbox: inbox.downgrade(),
             events: events.clone(),
-            next_task_id: AtomicU64::new(1),
+            next_task_id: AtomicU64::new(first_task_id.max(1)),
             tasks: Mutex::new(BTreeMap::new()),
             session_tools: tools,
         });
@@ -205,6 +219,11 @@ impl SessionHandle {
     pub fn tasks(&self) -> Vec<TaskInfo> {
         self.shared.tasks()
     }
+
+    /// 取消一个运行中的任务（与主控 `cancel_task` 工具效果一致）；不在运行时返回 `false`。
+    pub fn cancel_task(&self, task_id: u64) -> bool {
+        self.shared.cancel(task_id)
+    }
 }
 
 /// 会话共享状态：主控工具与后台任务都持有它。
@@ -236,7 +255,7 @@ impl Session {
     }
 
     pub(crate) fn emit(&self, event: AgentEvent) {
-        let _ = self.events.send(event);
+        self.events.send(event);
     }
 
     fn push_input(&self, input: Input) {
