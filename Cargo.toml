@@ -1,7 +1,7 @@
 [workspace]
 resolver = "3"
 
-members = ["agent", "mind", "model", "plugin", "sandbox", "server", "symbol", "thought-core"]
+members = ["agent", "browser", "mind", "model", "plugin", "sandbox", "server", "symbol", "thought-core"]
 
 
 [workspace.dependencies]
@@ -24,6 +24,8 @@ uuid = { version = "1.27.0", features = ["v4"] }
 toml = "1.1.7"
 tokio-stream = { version = "0.1.19", features = ["sync"] }
 tower = { version = "0.5", features = ["util"] }
+tokio-tungstenite = "0.28.0"
+base64 = "0.22.1"
 tower-http = { version = "0.6", features = ["fs"] }
 
 model = {path = "model"}
@@ -33,6 +35,7 @@ server = {path = "server"}
 symbol = {path = "symbol"}
 sandbox = {path = "sandbox"}
 mind = {path = "mind"}
+browser = {path = "browser"}
 thought-core = {path = "thought-core"}
 # 发布用：cargo build --profile dist -p thought-core
 [profile.dist]

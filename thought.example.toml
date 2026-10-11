@@ -106,6 +106,20 @@ gender = "女"
 birthday = "2026-10-11"
 seed = "我叫思想，今天是我出生的第一天。我还不太了解自己，也不了解这个世界。"
 
+# ---- 她专属的浏览器（browser_* 工具，经 CDP 完全控制）----
+# 启动一个只属于她的 Chromium：profile（登录态、cookie）与下载都在她的工作区。
+# 想让她登录某些网站，就让她自己去登；或设 connect 连接一个已在运行的实例。
+[browser]
+executable = "chromium"
+profile_dir = "data/mind/workspace/.browser/profile"
+download_dir = "data/mind/workspace/downloads"
+port = 9333                      # 只监听 127.0.0.1
+headless = true
+width = 1280
+height = 800
+args = []                        # 以 root 或在容器里运行时需要 ["--no-sandbox"]
+# connect = "http://127.0.0.1:9222"
+
 # ---- agent ----
 
 [agent.controller]
@@ -118,7 +132,7 @@ name = "coder"
 description = "Writes, reads and modifies code and files; runs shell commands to build and test."
 model = "deepseek"
 system = "You are a careful senior software engineer. Inspect before you change, keep changes minimal, and verify by running the build or tests."
-tools = ["read_file", "write_file", "delete_file", "run_command"]
+tools = ["read_file", "write_file", "delete_file", "restore_file", "run_command"]
 can_spawn = true
 
 [[agent.workers]]
@@ -127,6 +141,15 @@ description = "Answers questions by reading files and recalling long-term memory
 model = "deepseek-flash"
 system = "You research and summarize. Cite the files or memories you used."
 tools = ["read_file"]
+can_spawn = false
+
+# 需要 [browser]：没启用浏览器时请删掉这个 worker（否则启动校验会报 unknown tool）
+[[agent.workers]]
+name = "web"
+description = "Uses a real browser: opens sites, reads pages, clicks, fills forms, logs in, downloads files."
+model = "deepseek"
+system = "You operate a real Chromium. Start with browser_snapshot to see the page; target elements by their [n] ref. Take a new snapshot after the page changes. Report what you found and did."
+tools = ["browser_navigate", "browser_history", "browser_tabs", "browser_tab_new", "browser_tab_switch", "browser_tab_close", "browser_snapshot", "browser_text", "browser_click", "browser_hover", "browser_type", "browser_press", "browser_scroll", "browser_select", "browser_upload", "browser_wait", "browser_eval", "browser_screenshot", "browser_cookies", "browser_downloads", "browser_cdp", "read_file", "write_file"]
 can_spawn = false
 
 [agent.limits]

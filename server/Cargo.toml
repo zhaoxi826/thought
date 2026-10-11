@@ -24,6 +24,7 @@ plugin = { workspace = true }
 symbol = { workspace = true }
 sandbox = { workspace = true }
 mind = { workspace = true }
+browser = { workspace = true }
 tower-http = { workspace = true }
 
 [dev-dependencies]

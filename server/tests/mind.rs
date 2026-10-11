@@ -180,3 +180,43 @@ async fn she_hears_answers_and_her_inner_life_is_transparent_with_step_up() {
     let drives: Vec<&str> = status["heart"]["readings"].as_array().unwrap().iter().map(|r| r["name"].as_str().unwrap()).collect();
     assert_eq!(drives, ["missing", "share", "curiosity", "project", "tidy"], "{status}");
 }
+
+#[tokio::test]
+async fn she_gets_browser_tools_and_her_profile_is_protected() {
+    let exe = ["chromium", "chromium-browser", "google-chrome"]
+        .iter()
+        .find_map(|n| std::env::var_os("PATH").and_then(|p| std::env::split_paths(&p).map(|d| d.join(n)).find(|p| p.is_file())));
+    let Some(exe) = exe else {
+        eprintln!("no chromium; skipping");
+        return;
+    };
+    let llm = MockLlm::start(vec![("her", vec![text_reply("")])]).await;
+    let dir = std::path::PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join(format!("mind-browser-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let port = 20333 + (std::process::id() % 500);
+    let toml = config_toml(&llm.url).replace(
+        "[mind]",
+        &format!("[browser]\nexecutable = {:?}\nport = {port}\nargs = [\"--no-sandbox\"]\n\n[mind]", exe.display().to_string()),
+    );
+    std::fs::write(dir.join("thought.toml"), toml).unwrap();
+    let built = server::build_from_file(&dir.join("thought.toml"), plugin::Registry::new()).await.unwrap();
+    drop(built);
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    // 她的第一个回合（苏醒）请求里带着浏览器工具
+    let reqs = llm.requests("her");
+    assert!(!reqs.is_empty());
+    for t in ["browser_navigate", "browser_snapshot", "browser_click", "browser_type", "browser_eval", "browser_cdp", "browser_screenshot"] {
+        assert!(reqs[0].contains(&format!("\"{t}\"")), "{t} offered");
+    }
+    // profile 在工作区里，但 shell / 文件工具碰不到
+    let profile = dir.join("data/mind/workspace/.browser/profile");
+    assert!(profile.is_dir(), "profile created under her workspace");
+    let cfg: server::ServerConfig = toml::from_str(&std::fs::read_to_string(dir.join("thought.toml")).unwrap()).unwrap();
+    let mut cfg = cfg;
+    cfg.resolve_paths(&dir);
+    let sb = cfg.effective_sandbox(Some(&dir.join("thought.toml")));
+    assert!(sb.protected.iter().any(|p| p == &profile), "{:?}", sb.protected);
+    let _ = std::fs::remove_dir_all(&dir);
+}

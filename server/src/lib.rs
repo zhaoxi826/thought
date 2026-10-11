@@ -60,6 +60,16 @@ pub async fn build_from_file(path: &std::path::Path, extra_tools: Registry) -> R
     config.resolve_paths(&config::config_dir(path));
     let sandbox = sandbox::Sandbox::new(&config.effective_sandbox(Some(path))).map_err(|e| fail("sandbox", e))?;
     let mut tools = plugin::tools::file_tools::builtin_registry(Arc::new(sandbox));
+    // 她专属的浏览器：启动失败不阻止服务启动，只是没有 browser_* 工具
+    if let Some(cfg) = &config.browser {
+        match browser::Browser::start(cfg.clone()).await {
+            Ok(b) => {
+                browser::register_browser_tools(&mut tools, b);
+                tracing::info!("browser ready ({} tools)", tools.names().filter(|n| n.starts_with("browser_")).count());
+            }
+            Err(e) => tracing::warn!("browser unavailable: {e}"),
+        }
+    }
     tools.extend(&extra_tools);
     build_inner(&config, Some(path.to_path_buf()), tools).await
 }

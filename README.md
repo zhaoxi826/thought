@@ -10,6 +10,7 @@
 | `plugin` | `Tool` trait + `Registry`，内置 `read_file` / `write_file` / `delete_file` / `run_command` |
 | `agent` | 三层 agent 系统与共用的 ReAct 执行器 `Runner` |
 | `symbol` | 持久化记忆器 `MemoryStore`（参考 [A_memorix](https://github.com/A-Dawn/A_memorix)），记忆工具 |
+| `browser` | 她专属的 Chromium（CDP 完全控制）：`browser_*` 工具——导航、快照编号定位、真实鼠标键盘、JS、截图、cookie、上传下载、多标签，`browser_cdp` 发任意 CDP 命令 |
 | `server` | axum 后端：登录 / JWT、会话 + SSE、记忆接口；`server::build` 组装一切 |
 | `thought-core` | 二进制 `thought`：读配置、注册工具、启动服务 |
 

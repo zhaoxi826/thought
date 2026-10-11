@@ -43,6 +43,10 @@ pub struct ServerConfig {
     /// 心智（思想）。缺省时不启用，对话走旧的每会话主控。
     #[serde(default)]
     pub mind: Option<crate::mind::MindSection>,
+
+    /// 她专属的浏览器（`browser_*` 工具）。缺省不启用。
+    #[serde(default)]
+    pub browser: Option<browser::BrowserConfig>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -85,6 +89,9 @@ impl ServerConfig {
             resolve_endpoint(&mut memory.store.endpoint, base);
         }
         self.sandbox.resolve_paths(base);
+        if let Some(b) = &mut self.browser {
+            b.resolve_paths(base);
+        }
     }
 
     /// 沙箱实际生效的配置：在用户配置的受保护路径之外，自动加上配置文件、
@@ -108,6 +115,11 @@ impl ServerConfig {
             if let Some(dir) = endpoint.strip_prefix("surrealkv://") {
                 sb.protected.push(PathBuf::from(dir));
             }
+        }
+        // 浏览器 profile 由浏览器自己读写（登录态、cookie）；shell 与文件工具不碰它，
+        // 防止误删或经 shell 绕过浏览器读取 cookie 数据库
+        if let Some(b) = &self.browser {
+            sb.protected.push(b.profile_dir.clone());
         }
         sb
     }
