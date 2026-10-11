@@ -2,5 +2,5 @@
 .idea/
 /data/
 thought.toml
-design/.xdg/
-design/.home/
+design/
+thought.toml.bak
