@@ -51,11 +51,15 @@ pub async fn build(config: &ServerConfig, tools: Registry) -> Result<Built, Buil
     build_inner(config, None, tools).await
 }
 
-/// 从配置文件组装：解析相对路径，并让 `GET/PUT /api/config` 可读写该文件。
-pub async fn build_from_file(path: &std::path::Path, tools: Registry) -> Result<Built, BuildError> {
+/// 从配置文件组装：解析相对路径，按 `[sandbox]` 建好沙箱与内置工具，
+/// 并让 `GET/PUT /api/config` 可读写该文件。`extra_tools` 会并入内置工具池。
+pub async fn build_from_file(path: &std::path::Path, extra_tools: Registry) -> Result<Built, BuildError> {
     let text = std::fs::read_to_string(path).map_err(|e| fail(&format!("read {}", path.display()), e))?;
     let mut config: ServerConfig = toml::from_str(&text).map_err(|e| fail(&format!("parse {}", path.display()), e))?;
     config.resolve_paths(&config::config_dir(path));
+    let sandbox = sandbox::Sandbox::new(&config.effective_sandbox(Some(path))).map_err(|e| fail("sandbox", e))?;
+    let mut tools = plugin::tools::file_tools::builtin_registry(Arc::new(sandbox));
+    tools.extend(&extra_tools);
     build_inner(&config, Some(path.to_path_buf()), tools).await
 }
 

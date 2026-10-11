@@ -32,9 +32,8 @@ async fn main() -> ExitCode {
 
 async fn run() -> Result<(), String> {
     let path = std::env::args().nth(1).unwrap_or_else(|| "thought.toml".to_owned());
-    let tools = plugin::tools::file_tools::builtin_registry();
-    // 从文件组装：相对路径以配置文件所在目录为准，并启用配置读写接口
-    let built = server::build_from_file(std::path::Path::new(&path), tools)
+    // 从文件组装：相对路径以配置文件所在目录为准；内置文件 / 命令工具经 [sandbox] 隔离
+    let built = server::build_from_file(std::path::Path::new(&path), plugin::Registry::new())
         .await
         .map_err(|e| e.to_string())?;
     let config = built.state.config();

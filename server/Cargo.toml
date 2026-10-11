@@ -22,6 +22,7 @@ model = { workspace = true }
 agent = { workspace = true }
 plugin = { workspace = true }
 symbol = { workspace = true }
+sandbox = { workspace = true }
 tower-http = { workspace = true }
 
 [dev-dependencies]

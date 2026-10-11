@@ -81,6 +81,9 @@ fn classify(new: &ServerConfig, old: &ServerConfig) -> (Vec<&'static str>, Vec<&
     if changed(&new.embedding, &old.embedding) {
         restart.push("embedding");
     }
+    if changed(&new.sandbox, &old.sandbox) {
+        restart.push("sandbox");
+    }
     // memory：只有 per_user / save_user_messages 热生效，其余需重启
     let mem_core = |c: &ServerConfig| {
         c.memory.as_ref().map(|m| {
@@ -186,6 +189,12 @@ pub fn apply(state: &AppState, if_match: Option<&str>, body: Json) -> Result<App
 fn unresolve_paths(config: &mut ServerConfig, base: &Path) {
     if let Ok(rel) = config.http.web_dir.strip_prefix(base) {
         config.http.web_dir = rel.to_path_buf();
+    }
+    let sb = &mut config.sandbox;
+    for p in [&mut sb.workspace, &mut sb.trash, &mut sb.backup].into_iter().chain(sb.protected.iter_mut()) {
+        if let Ok(rel) = p.strip_prefix(base) {
+            *p = rel.to_path_buf();
+        }
     }
     let strip = |endpoint: &mut String| {
         const SCHEME: &str = "surrealkv://";

@@ -59,6 +59,19 @@ per_user = true                      # 每个用户一个记忆空间
 save_user_messages = false           # 是否自动把每条用户消息写入记忆
 half_life_hours = 168.0
 
+# ---- 沙箱：思想的文件与命令边界 ----
+# 工作区内完全自由；外部可读写但改前自动备份；删除一律进回收站（可恢复）；
+# 命令在 bubblewrap 里执行，宿主只读，shell 改不了外部文件。
+# 配置文件本身与 surrealkv 存储目录自动受保护，无需列出。
+[sandbox]
+workspace = "data/mind/workspace"
+trash = "data/mind/trash"
+backup = "data/mind/backup"
+protected = []                   # 额外的不可触碰路径（绝对路径），如 ["/home/thought/.ssh"]
+network = true
+command_timeout_secs = 120
+max_output_bytes = 262144
+
 # ---- agent ----
 
 [agent.controller]

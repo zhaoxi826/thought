@@ -1,17 +1,16 @@
-//! delete_file 工具：为 agent 提供删除文件的能力。
+//! delete_file：删除文件——实际是移入回收站，可用 restore_file 恢复。
 
+use super::parse_args;
 use crate::tool::Tool;
 use model::{Function, Parameter, ParameterType};
+use sandbox::Sandbox;
 use serde::Deserialize;
-use tokio::fs;
-use tracing::error;
+use std::sync::Arc;
 
-/// 删除文件工具。
-pub struct DeleteFile;
+pub struct DeleteFile(pub Arc<Sandbox>);
 
-/// `delete_file` 的入参，从模型回传的 JSON 参数串反序列化而来。
 #[derive(Deserialize)]
-struct DeleteFileArgs {
+struct Args {
     file_path: String,
 }
 
@@ -24,32 +23,17 @@ impl Tool for DeleteFile {
     fn definition(&self) -> Function {
         Function {
             name: "delete_file".to_owned(),
-            description: "A tool to delete a file".to_owned(),
-            parameters: vec![Parameter {
-                name: "file_path".to_owned(),
-                description: "Path to the file to delete".to_owned(),
-                r#type: ParameterType::String,
-                required: true,
-            }],
+            description: "Delete a file. It is moved to the trash and can be restored with restore_file.".to_owned(),
+            parameters: vec![Parameter::required("file_path", "Path to the file", ParameterType::String)],
             strict: false,
         }
     }
 
     async fn call(&self, arguments: &str) -> String {
-        let args: DeleteFileArgs = match serde_json::from_str(arguments) {
-            Ok(args) => args,
-            Err(e) => {
-                error!("delete_file: invalid arguments {arguments:?}, err: {e}");
-                return format!("invalid arguments for delete_file: {e}");
-            }
-        };
-
-        match fs::remove_file(&args.file_path).await {
-            Ok(()) => format!("deleted file {}", args.file_path),
-            Err(e) => {
-                error!("can't delete file {}, err: {e}", args.file_path);
-                format!("can't delete file {}, err: {e}", args.file_path)
-            }
+        let args: Args = parse_args!("delete_file", arguments);
+        match self.0.fs.delete(&args.file_path).await {
+            Ok(entry) => format!("moved {} to trash (trash id: {})", entry.original, entry.id),
+            Err(e) => format!("can't delete file: {e}"),
         }
     }
 }

@@ -1,30 +1,19 @@
-//! run_command 工具：为 agent 提供执行 shell 命令的能力。
+//! run_command：在沙箱里执行 shell 命令（工作目录为工作区）。
+//!
+//! bubblewrap 下宿主文件系统只读、受保护路径不可见，所以命令改不了工作区外的文件；
+//! 要改外部文件请用 write_file（自动备份），要删请用 delete_file（进回收站）。
 
+use super::parse_args;
 use crate::tool::Tool;
 use model::{Function, Parameter, ParameterType};
+use sandbox::Sandbox;
 use serde::Deserialize;
-use tokio::process::Command;
-use tracing::error;
+use std::sync::Arc;
 
-/// 命令执行工具：通过 `sh -c` 运行命令，返回退出码与 stdout/stderr。
-///
-/// 超时后子进程被杀掉（`kill_on_drop`），避免挂住的命令永久占用 agent。
-/// 注意：没有沙箱，命令以宿主进程的权限运行。
-pub struct RunCommand {
-    pub timeout: std::time::Duration,
-}
+pub struct RunCommand(pub Arc<Sandbox>);
 
-impl Default for RunCommand {
-    fn default() -> Self {
-        Self {
-            timeout: std::time::Duration::from_secs(120),
-        }
-    }
-}
-
-/// `run_command` 的入参，从模型回传的 JSON 参数串反序列化而来。
 #[derive(Deserialize)]
-struct RunCommandArgs {
+struct Args {
     command: String,
 }
 
@@ -37,55 +26,22 @@ impl Tool for RunCommand {
     fn definition(&self) -> Function {
         Function {
             name: "run_command".to_owned(),
-            description: "A tool to run a shell command and return its output".to_owned(),
-            parameters: vec![Parameter {
-                name: "command".to_owned(),
-                description: "The shell command to run".to_owned(),
-                r#type: ParameterType::String,
-                required: true,
-            }],
+            description: "Run a shell command with your workspace as the working directory. Files \
+                          outside the workspace are read-only here; change them with write_file or \
+                          delete_file instead."
+                .to_owned(),
+            parameters: vec![Parameter::required("command", "The shell command to run", ParameterType::String)],
             strict: false,
         }
     }
 
     async fn call(&self, arguments: &str) -> String {
-        let args: RunCommandArgs = match serde_json::from_str(arguments) {
-            Ok(args) => args,
+        let args: Args = parse_args!("run_command", arguments);
+        match self.0.run(&args.command).await {
+            Ok(output) => output.render(),
             Err(e) => {
-                error!("run_command: invalid arguments {arguments:?}, err: {e}");
-                return format!("invalid arguments for run_command: {e}");
-            }
-        };
-
-        let child = Command::new("sh")
-            .arg("-c")
-            .arg(&args.command)
-            .stdin(std::process::Stdio::null())
-            .kill_on_drop(true)
-            .output();
-        let result = match tokio::time::timeout(self.timeout, child).await {
-            Ok(result) => result,
-            Err(_) => {
-                error!("command {:?} timed out", args.command);
-                return format!("command timed out after {}s", self.timeout.as_secs());
-            }
-        };
-        match result {
-            Ok(output) => {
-                // code() 为 None 表示被信号终止
-                let status = match output.status.code() {
-                    Some(code) => code.to_string(),
-                    None => format!("terminated by signal ({})", output.status),
-                };
-                format!(
-                    "exit code: {status}\nstdout:\n{}\nstderr:\n{}",
-                    String::from_utf8_lossy(&output.stdout),
-                    String::from_utf8_lossy(&output.stderr)
-                )
-            }
-            Err(e) => {
-                error!("can't run command {:?}, err: {e}", args.command);
-                format!("can't run command {:?}, err: {e}", args.command)
+                tracing::error!("can't run command {:?}, err: {e}", args.command);
+                format!("can't run command: {e}")
             }
         }
     }

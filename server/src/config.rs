@@ -31,6 +31,10 @@ pub struct ServerConfig {
     pub memory: Option<MemorySection>,
 
     pub agent: AgentConfig,
+
+    /// 文件与命令的沙箱边界。
+    #[serde(default)]
+    pub sandbox: sandbox::SandboxConfig,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -72,6 +76,31 @@ impl ServerConfig {
         if let Some(memory) = &mut self.memory {
             resolve_endpoint(&mut memory.store.endpoint, base);
         }
+        self.sandbox.resolve_paths(base);
+    }
+
+    /// 沙箱实际生效的配置：在用户配置的受保护路径之外，自动加上配置文件、
+    /// 其备份 / 临时文件，以及 SurrealKV 存储目录，防止她改自己的"大脑"和配置。
+    pub fn effective_sandbox(&self, config_path: Option<&Path>) -> sandbox::SandboxConfig {
+        let mut sb = self.sandbox.clone();
+        if let Some(path) = config_path {
+            let path = if path.is_relative() {
+                std::env::current_dir().map(|d| d.join(path)).unwrap_or_else(|_| path.to_path_buf())
+            } else {
+                path.to_path_buf()
+            };
+            for ext in ["toml", "toml.bak", "toml.tmp"] {
+                sb.protected.push(path.with_extension(ext));
+            }
+        }
+        let endpoints = std::iter::once(&self.storage.endpoint)
+            .chain(self.memory.as_ref().map(|m| &m.store.endpoint));
+        for endpoint in endpoints {
+            if let Some(dir) = endpoint.strip_prefix("surrealkv://") {
+                sb.protected.push(PathBuf::from(dir));
+            }
+        }
+        sb
     }
 }
 
@@ -190,6 +219,29 @@ pub(crate) fn secret(plain: &Option<String>, env: &Option<String>) -> Option<Str
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn effective_sandbox_protects_config_and_storage() {
+        let mut config: ServerConfig = toml::from_str(
+            r#"
+[auth]
+[storage]
+endpoint = "surrealkv://data/thought"
+namespace = "t"
+database = "s"
+[models]
+[agent.controller]
+model = "m"
+"#,
+        )
+        .unwrap();
+        config.resolve_paths(Path::new("/srv/thought"));
+        let sb = config.effective_sandbox(Some(Path::new("/srv/thought/thought.toml")));
+        assert_eq!(sb.workspace, Path::new("/srv/thought/data/mind/workspace"));
+        for p in ["/srv/thought/thought.toml", "/srv/thought/thought.toml.bak", "/srv/thought/data/thought"] {
+            assert!(sb.protected.iter().any(|x| x == Path::new(p)), "{p} not protected: {:?}", sb.protected);
+        }
+    }
 
     #[test]
     fn resolves_relative_paths_against_config_dir() {

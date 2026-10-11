@@ -1,17 +1,16 @@
-//! write_file 工具：为 agent 提供写文件的能力（覆盖写）。
+//! write_file：写文件（覆盖）。工作区外的已有文件会先自动备份。
 
+use super::parse_args;
 use crate::tool::Tool;
 use model::{Function, Parameter, ParameterType};
+use sandbox::Sandbox;
 use serde::Deserialize;
-use tokio::fs;
-use tracing::error;
+use std::sync::Arc;
 
-/// 写文件工具：把内容写入指定路径，文件存在则覆盖。
-pub struct WriteFile;
+pub struct WriteFile(pub Arc<Sandbox>);
 
-/// `write_file` 的入参，从模型回传的 JSON 参数串反序列化而来。
 #[derive(Deserialize)]
-struct WriteFileArgs {
+struct Args {
     file_path: String,
     file_content: String,
 }
@@ -25,41 +24,26 @@ impl Tool for WriteFile {
     fn definition(&self) -> Function {
         Function {
             name: "write_file".to_owned(),
-            description: "A tool to write content to a file (overwrites if it exists)".to_owned(),
+            description: "Write content to a file, overwriting it. Relative paths are inside your \
+                          workspace. Files outside the workspace are backed up before being changed."
+                .to_owned(),
             parameters: vec![
-                Parameter {
-                    name: "file_path".to_owned(),
-                    description: "Path to the file to write".to_owned(),
-                    r#type: ParameterType::String,
-                    required: true,
-                },
-                Parameter {
-                    name: "file_content".to_owned(),
-                    description: "Content to write into the file".to_owned(),
-                    r#type: ParameterType::String,
-                    required: true,
-                },
+                Parameter::required("file_path", "Path to the file", ParameterType::String),
+                Parameter::required("file_content", "Full new content", ParameterType::String),
             ],
             strict: false,
         }
     }
 
     async fn call(&self, arguments: &str) -> String {
-        let args: WriteFileArgs = match serde_json::from_str(arguments) {
-            Ok(args) => args,
-            Err(e) => {
-                error!("write_file: invalid arguments {arguments:?}, err: {e}");
-                return format!("invalid arguments for write_file: {e}");
-            }
-        };
-
+        let args: Args = parse_args!("write_file", arguments);
         let len = args.file_content.len();
-        match fs::write(&args.file_path, &args.file_content).await {
-            Ok(()) => format!("wrote {len} bytes to {}", args.file_path),
-            Err(e) => {
-                error!("can't write file {}, err: {e}", args.file_path);
-                format!("can't write file {}, err: {e}", args.file_path)
+        match self.0.fs.write(&args.file_path, &args.file_content).await {
+            Ok((abs, None)) => format!("wrote {len} bytes to {}", abs.display()),
+            Ok((abs, Some(backup))) => {
+                format!("wrote {len} bytes to {} (previous version backed up to {})", abs.display(), backup.display())
             }
+            Err(e) => format!("can't write file: {e}"),
         }
     }
 }
