@@ -26,6 +26,7 @@ export const TasksPage = {
         document.querySelectorAll('#task-tabs .tab').forEach((t) => t.classList.remove('active'));
         tab.classList.add('active');
         filter = tab.dataset.filter;
+        ensureView();
         render();
       });
     });
@@ -39,10 +40,16 @@ export const TasksPage = {
     filter = 'all';
     document.querySelectorAll('#task-tabs .tab').forEach((t) => t.classList.toggle('active', t.dataset.filter === 'all'));
     selectedKey = key;
+    if (!TasksStore.get(key)) TasksStore.loadKey(key).catch(() => {});
     render();
     switchPage('tasks');
   },
 };
+
+/** 切到某筛选时若该视图还没拉过，先拉第一页。 */
+function ensureView() {
+  if (!TasksStore.viewState(filter).started) TasksStore.loadView(filter).catch(() => {});
+}
 
 function scheduleRender() {
   if (renderTimer) return;
@@ -56,8 +63,8 @@ function render() {
   const all = TasksStore.list();
   renderStatusBar(all);
   renderTabs(all);
-  renderList(all);
-  renderFoot(all);
+  renderList();
+  renderFoot();
   renderDetail();
 }
 
@@ -156,12 +163,17 @@ function matchFilter(t) {
   return t.status === filter;
 }
 
-function renderList(all) {
+function renderList() {
   const box = document.getElementById('task-list');
   box.textContent = '';
-  const shown = all.filter(matchFilter);
+  // 当前筛选视图的键序（服务端分页顺序）→ 任务；状态漂移（如 running→done）再过滤一次
+  const shown = TasksStore.viewKeys(filter)
+    .map((k) => TasksStore.get(k))
+    .filter(Boolean)
+    .filter(matchFilter);
+  const known = TasksStore.list().length;
   if (!shown.length) {
-    box.append(h('div', { class: 'list-empty', text: all.length ? '该分类下暂无任务' : '暂无任务 · 对话中主控派单后会出现在这里' }));
+    box.append(h('div', { class: 'list-empty', text: '暂无任务' }));
     return;
   }
   for (const t of shown) {
@@ -185,20 +197,21 @@ function renderList(all) {
   }
 }
 
-/** 列表底栏：已载入条数 + 加载更多（游标分页）· 单会话并发。 */
-function renderFoot(all) {
+/** 列表底栏：已载入条数 + 加载更多（当前筛选的游标分页）。 */
+function renderFoot() {
   const foot = document.getElementById('task-list-foot');
   if (!foot) return;
   foot.textContent = '';
-  const left = h('span', { text: `LOADED ${all.length}` });
-  if (TasksStore.hasMore()) {
-    const busy = TasksStore.isLoadingMore();
+  const state = TasksStore.viewState(filter);
+  const loaded = TasksStore.viewKeys(filter).length;
+  const left = h('span', { text: `LOADED ${loaded}` });
+  if (state.hasMore) {
     left.append(h('button', {
-      class: 'more-btn foot-more', type: 'button', disabled: busy ? '' : null,
+      class: 'more-btn foot-more', type: 'button', disabled: state.loading ? '' : null,
       onclick() {
-        TasksStore.loadMore().catch((e) => toast(`加载失败：${e.message}`));
+        TasksStore.loadView(filter).catch((e) => toast(`加载失败：${e.message}`));
       },
-    }, busy ? '加载中…' : '加载更多'));
+    }, state.loading ? '加载中…' : '加载更多'));
   }
   const limit = TasksStore.limits?.max_concurrent_tasks;
   foot.append(left, h('span', { text: `CONCURRENCY ${busiestSessionRunning()}/${limit || '—'}` }));
@@ -251,7 +264,7 @@ function renderDetail() {
   const t = selectedKey && TasksStore.get(selectedKey);
   if (!t) {
     box.textContent = '';
-    box.append(h('div', { class: 'detail-empty', text: TasksStore.list().length ? '选择左侧任务查看详情' : '暂无任务' }));
+    box.append(h('div', { class: 'detail-empty', text: '暂无任务' }));
     return;
   }
   // 回填持久化活动事件（幂等：已加载 / 加载中不重复请求；结束后标 stale 会再拉一次补齐末段）
@@ -310,9 +323,9 @@ function cancelButton(t) {
 }
 
 function emptyActivityText(t) {
-  if (t.detail === 'loading' || t.detail === 'none') return '加载活动记录……';
+  if (t.detail === 'loading' || t.detail === 'none') return '加载中……';
   if (t.detail === 'error') return '活动记录加载失败';
-  return t.status === 'running' ? '等待第一个活动事件……' : '无活动记录';
+  return '暂无活动';
 }
 
 function detailBody(t) {

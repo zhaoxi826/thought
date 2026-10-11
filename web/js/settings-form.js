@@ -1,4 +1,4 @@
-// 设置页表单部件：输入 / 开关 / 环境变量块的接线，以及模型池卡与 worker 卡的构建。
+// 设置页表单部件：输入 / 开关 / 逗号列表的接线，以及模型池卡与 worker 卡的构建。
 // 由 js/settings.js 调用。编辑态下部件直接改写传入的配置对象（草稿），并回调 ctx.onChange。
 // ctx = { editable, onChange(), invalid:Set<Element> }
 
@@ -6,11 +6,10 @@ import { h } from './lib/dom.js';
 
 const PROVIDERS = ['openai', 'deepseek', 'anthropic']; // model::Provider（snake_case）
 const openState = new Set();   // 展开的卡：`model:name` / `worker:name`，重绘后保持
-const newModels = new Set();   // 本次编辑新增、尚未保存的模型（允许填写 api_key_env）
 let touched = false;           // 用户是否手动展开 / 收起过
 
-/** 重新加载配置前调用：清掉「新增模型」标记。 */
-export function resetForm() { newModels.clear(); }
+/** 重新加载配置前调用。（暂无跨次状态要清；保留给 settings.js 的重置入口。） */
+export function resetForm() {}
 
 /** 输入值按类型转换：str / int / float；nullable 时空串 → null。 */
 function parseValue(raw, type, nullable) {
@@ -29,7 +28,9 @@ export function wireInput(el, ctx, obj, prop, { type = 'str', nullable = false }
   el.type = type === 'str' ? 'text' : 'number';
   if (type !== 'str') el.classList.add('num');
   if (type === 'float') el.step = 'any';
-  el.value = v ?? '';
+  // f32 经 JSON 往返后的精度尾巴（0.6 → 0.6000000238…）只影响显示，不影响写回
+  const shown = type === 'float' && typeof v === 'number' ? Math.round(v * 1e6) / 1e6 : v;
+  el.value = shown ?? '';
   el.placeholder = '—';
   el.classList.toggle('placeholder', !editable && (v == null || v === ''));
   el.removeAttribute('aria-invalid');
@@ -65,13 +66,6 @@ export function wireSwitch(sw, ctx, obj, prop, onFlip) {
   sw.onkeydown = editable ? (e) => { if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); flip(); } } : null;
 }
 
-/** 环境变量块：只显示变量名（密钥本身从不经过前端）。 */
-export function setEnv(el, name) {
-  el.classList.toggle('placeholder', !name);
-  const n = el.querySelector('.env-name');
-  if (n) n.textContent = name || '—';
-}
-
 // ---------------------------------------------------------------- 字段构建
 
 /** 标签 + 输入（label 的 for 指向输入，读屏可读）。 */
@@ -82,7 +76,6 @@ export function field(ctx, label, obj, prop, opts = {}) {
   return h('div', { class: `field${opts.span2 ? ' span2' : ''}` },
     h('label', { for: id }, label, h('span', { class: 'key', text: opts.key || prop })),
     input,
-    opts.hint ? h('div', { class: 'hint', text: opts.hint }) : null,
   );
 }
 
@@ -96,6 +89,24 @@ function textArea(ctx, label, obj, prop, minRows) {
   return h('div', { class: 'field span2' },
     h('label', { for: id }, label, h('span', { class: 'key', text: prop })),
     ta,
+  );
+}
+
+/** 字符串数组字段：逗号分隔的单个输入（tools 等）。 */
+function listField(ctx, label, obj, prop, opts = {}) {
+  const id = `cfg-${Math.random().toString(36).slice(2, 9)}`;
+  const input = h('input', { id, type: 'text', 'aria-label': `${label} ${prop}` });
+  input.value = (obj[prop] || []).join(', ');
+  input.disabled = !ctx.editable;
+  if (ctx.editable) {
+    input.oninput = () => {
+      obj[prop] = input.value.split(',').map((s) => s.trim()).filter(Boolean);
+      ctx.onChange();
+    };
+  }
+  return h('div', { class: `field${opts.span2 ? ' span2' : ''}` },
+    h('label', { for: id }, label, h('span', { class: 'key', text: prop })),
+    input,
   );
 }
 
@@ -142,10 +153,8 @@ export function renderModels(box, models, ctx) {
   box.append(h('button', {
     class: 'add-model', type: 'button',
     disabled: ctx.editable ? null : '',
-    title: ctx.editable ? '新增一个模型池条目' : '仅管理员在配置文件模式下可编辑',
     onclick: ctx.editable ? () => addModel(box, models, ctx) : null,
   }, '+ 添加模型'));
-  box.append(envNote('密钥通过环境变量注入'));
 }
 
 function addModel(box, models, ctx) {
@@ -154,7 +163,6 @@ function addModel(box, models, ctx) {
   if (!/^[A-Za-z0-9_.-]+$/.test(name)) { window.alert('模型名只能包含字母、数字、. _ -'); return; }
   if (models[name]) { window.alert(`模型「${name}」已存在`); return; }
   models[name] = { provider: 'openai', model: '', base_url: '', api_key_env: null };
-  newModels.add(name);
   openState.add(`model:${name}`);
   touched = true;
   ctx.onChange();
@@ -176,11 +184,13 @@ function modelCard(name, cfg, idx, ctx) {
   const fields = h('div', { class: 'fields' },
     providerField(sub, cfg),
     field(sub, '模型', cfg, 'model'),
-    ed || cfg.base_url ? field(sub, 'Base URL', cfg, 'base_url', { hint: ed ? '留空用提供商默认地址' : null }) : null,
-    apiKeyField(sub, name, cfg, !(ed || cfg.base_url)),
+    ed || cfg.base_url ? field(sub, 'Base URL', cfg, 'base_url') : null,
+    // api_key_env 是环境变量名（普通文本），密钥本体从不经过前端
+    field(sub, 'API 密钥', cfg, 'api_key_env', { nullable: true, span2: !(ed || cfg.base_url) }),
     ed || cfg.temperature != null ? field(sub, '温度', cfg, 'temperature', { type: 'float', nullable: true }) : null,
     ed || cfg.top_p != null ? field(sub, 'Top P', cfg, 'top_p', { type: 'float', nullable: true }) : null,
     ed || cfg.max_tokens != null ? field(sub, '最大输出 tokens', cfg, 'max_tokens', { type: 'int', nullable: true }) : null,
+    ed || cfg.thinking != null ? thinkingField(sub, cfg) : null,
   );
   return card(`model:${name}`, idx, 'model',
     [h('span', { class: 'model-name', text: name }), meta, badges], fields);
@@ -199,17 +209,26 @@ function providerField(ctx, cfg) {
   );
 }
 
-/** api_key_env：已有条目只显示变量名（锁定）；新增条目可填写变量名。 */
-function apiKeyField(ctx, name, cfg, span2) {
-  const label = h('label', {}, 'API 密钥', h('span', { class: 'key', text: 'api_key_env' }));
-  if (ctx.editable && newModels.has(name)) {
-    return field(ctx, 'API 密钥', cfg, 'api_key_env', {
-      span2, nullable: true, hint: '填环境变量名（如 OPENAI_API_KEY），不要填密钥本身',
-    });
+/** thinking：可选布尔（缺省 = 提供商默认），用三态下拉呈现。 */
+function thinkingField(ctx, cfg) {
+  if (!ctx.editable) {
+    return field(ctx, '思考模式', { thinking: cfg.thinking == null ? '' : String(cfg.thinking) }, 'thinking');
   }
-  const env = h('div', { class: 'env-input' }, h('span', { class: 'env-name' }), lockIcon());
-  setEnv(env, cfg.api_key_env);
-  return h('div', { class: `field${span2 ? ' span2' : ''}` }, label, env);
+  const id = `cfg-${Math.random().toString(36).slice(2, 9)}`;
+  const sel = h('select', { id },
+    h('option', { value: '', text: '默认' }),
+    h('option', { value: 'true', text: '开启' }),
+    h('option', { value: 'false', text: '关闭' }),
+  );
+  sel.value = cfg.thinking == null ? '' : String(cfg.thinking);
+  sel.onchange = () => {
+    cfg.thinking = sel.value === '' ? null : sel.value === 'true';
+    ctx.onChange();
+  };
+  return h('div', { class: 'field' },
+    h('label', { for: id }, '思考模式', h('span', { class: 'key', text: 'thinking' })),
+    sel,
+  );
 }
 
 // ---------------------------------------------------------------- Agent
@@ -217,14 +236,33 @@ function apiKeyField(ctx, name, cfg, span2) {
 /** 渲染主控 + worker 卡。agent = { controller, workers }（编辑态为草稿，原地修改）。 */
 export function renderAgent(box, agent, ctx) {
   box.textContent = '';
-  box.append(h('div', { class: 'fields mb14' },
-    agent.controller
-      ? field(ctx, '主控模型', agent.controller, 'model', { key: 'controller.model', hint: '主控尽量只派单，仅开放记忆工具' })
-      : null,
-  ));
+  if (agent.controller) {
+    box.append(h('div', { class: 'fields mb14' },
+      field(ctx, '主控模型', agent.controller, 'model', { key: 'controller.model' }),
+      field(ctx, '主控轮数', agent.controller, 'max_turns', { key: 'controller.max_turns', type: 'int' }),
+    ));
+    if (agent.controller.system != null || ctx.editable) {
+      box.append(h('div', { class: 'fields mb14' },
+        textArea(ctx, '主控附加提示', nullableWrap(agent.controller), 'system', 2),
+      ));
+    }
+    if (ctx.editable) {
+      box.append(h('div', { class: 'fields mb14' },
+        listField(ctx, '主控工具', agent.controller, 'tools', { key: 'controller.tools', span2: true }),
+      ));
+    }
+  }
   const workers = agent.workers || [];
   if (!workers.length) box.append(h('div', { class: 'card-note', text: '未配置 worker' }));
   workers.forEach((w, i) => box.append(workerCard(w, i, ctx)));
+}
+
+/** controller.system 是 Option<String>：包一层把空串写成 null。 */
+function nullableWrap(obj) {
+  return new Proxy(obj, {
+    get: (t, p) => t[p],
+    set: (t, p, v) => { t[p] = v === '' ? null : v; return true; },
+  });
 }
 
 function workerCard(w, idx, ctx) {
@@ -243,12 +281,15 @@ function workerCard(w, idx, ctx) {
     textArea(sub, '职责描述', w, 'description', 2),
     // system：/api/agents 与 /api/config 均带出；老后端缺字段时不显示
     w.system != null ? textArea(sub, '系统提示', w, 'system', 3) : null,
-    h('div', { class: 'field span2' },
-      h('label', {}, '工具', h('span', { class: 'key', text: 'tools' })),
-      h('div', { class: 'tool-chips' }, ...tools.map((t) => h('span', { class: 'tchip', text: t }))),
-    ),
+    ctx.editable
+      ? listField(sub, '工具', w, 'tools', { span2: true })
+      : h('div', { class: 'field span2' },
+          h('label', {}, '工具', h('span', { class: 'key', text: 'tools' })),
+          h('div', { class: 'tool-chips' }, ...tools.map((t) => h('span', { class: 'tchip', text: t }))),
+        ),
     toggle(sub, '允许派生子 agent', w, 'can_spawn'),
     field(sub, '模型', w, 'model'),
+    field(sub, '轮数上限', w, 'max_turns', { type: 'int' }),
   );
   return card(`worker:${w.name}`, idx, 'model worker', [
     h('span', { class: 'model-name', text: w.name }),
@@ -256,27 +297,4 @@ function workerCard(w, idx, ctx) {
     h('span', { class: 'tools-count', text: `tools ${tools.length} 个` }),
     spawn,
   ], body);
-}
-
-// ---------------------------------------------------------------- 图标
-
-function svgEl(tag, attrs) {
-  const el = document.createElementNS('http://www.w3.org/2000/svg', tag);
-  for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, v);
-  return el;
-}
-
-export function lockIcon() {
-  const svg = svgEl('svg', { width: '11', height: '11', viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', 'stroke-width': '1.8' });
-  svg.append(
-    svgEl('rect', { x: '4', y: '11', width: '16', height: '10', rx: '2' }),
-    svgEl('path', { d: 'M8 11V7a4 4 0 0 1 8 0v4' }),
-  );
-  return h('span', { class: 'lock' }, svg);
-}
-
-export function envNote(text) {
-  const svg = svgEl('svg', { width: '11', height: '11', viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', 'stroke-width': '1.6' });
-  svg.append(svgEl('circle', { cx: '12', cy: '12', r: '9' }), svgEl('path', { d: 'M12 8v5M12 16h.01' }));
-  return h('div', { class: 'env-note' }, svg, document.createTextNode(text));
 }

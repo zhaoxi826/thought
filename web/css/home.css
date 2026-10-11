@@ -331,16 +331,6 @@
   flex: none;
 }
 .page-home .send:hover { background: var(--accent); }
-.page-home .composer-hint {
-  max-width: 720px;
-  margin: 4px auto 0;
-  padding: 0 34px;
-  font-size: 10px;
-  color: var(--ink-faint);
-  letter-spacing: 0.05em;
-  text-align: center;
-}
-
 .page-home ::selection { background: rgba(194, 71, 58, 0.15); }
 .page-home .scroll::-webkit-scrollbar, .page-home .sessions::-webkit-scrollbar { width: 5px; }
 .page-home .scroll::-webkit-scrollbar-thumb, .page-home .sessions::-webkit-scrollbar-thumb {
@@ -433,7 +423,7 @@
 }
 .page-home .side-user .logout:hover { color: var(--accent); }
 
-/* 记忆面板：搜索框 + score 细横条 */
+/* 记忆面板：搜索框 + score 细横条 + 可见性 chip */
 .page-home .pop .mem-search {
   width: 240px;
   border: 1px solid var(--hairline);
@@ -462,6 +452,17 @@
   background: var(--accent);
   border-radius: 2px;
 }
+.page-home .pop .mem .vis {
+  flex: none;
+  font-size: 9.5px;
+  letter-spacing: 0.08em;
+  color: var(--ink-faint);
+  border: 1px solid var(--hairline-strong);
+  border-radius: 4px;
+  padding: 0 5px;
+  align-self: center;
+}
+.page-home .pop .mem .vis.pub { color: var(--accent); border-color: rgba(194, 71, 58, 0.35); }
 .page-home .pop .mem-empty {
   font-size: 12px;
   color: var(--ink-faint);
@@ -624,12 +625,3 @@
 }
 .page-home .body a { color: var(--accent); text-decoration: none; border-bottom: 1px solid var(--hairline-strong); }
 .page-home .body a:hover { border-bottom-color: var(--accent); }
-
-/* 空态 */
-.page-home .empty-hint {
-  text-align: center;
-  color: var(--ink-faint);
-  font-size: 13px;
-  letter-spacing: 0.06em;
-  padding-top: 120px;
-}

@@ -18,8 +18,9 @@
 //   subscribe(id, fn)             对话页订阅会话事件（按需建逐会话 SSE），返回退订函数
 //   waitOpen(id)                  等该会话 SSE 进入 open（发消息前调用，避免丢 reply）
 //   list() / get(key) / runningCount() / onChange(fn)
-//   hasMore() / isLoadingMore() / loadMore()   历史分页
+//   loadView(view) / viewKeys(view) / viewState(view)   按筛选分页（tab 直接映射 status 参数）
 //   ensureDetail(key, force)      回填持久化活动事件（幂等；force 时失败可重试）
+//   loadKey(key)                  深链：按 key 拉详情建出任务
 //   cancel(key)                   取消任务；失败抛 ApiError（404 / 409）
 //   agents / setAgents(a) / limits             GET /api/agents 缓存（含 limits）
 
@@ -30,6 +31,8 @@ const AGENT_RE = /^([^#]+)#(\d+)(\/sub\d+)?$/; // "coder#3" / "coder#3/sub1"
 const PAGE = 50;
 const TASK_EVENTS = new Set(['task_started', 'task_finished', 'tool_call', 'tool_result', 'text_delta', 'usage']);
 const TERMINAL = new Set(['done', 'error', 'cancelled']);
+/** 列表筛选 tab → status 查询参数。 */
+const VIEW_STATUS = { all: '', running: 'running', done: 'done', failed: 'error,cancelled' };
 
 const tasks = new Map();          // `${sessionId}:${taskId}` -> task
 const titles = new Map();         // sessionId -> 会话标题
@@ -37,11 +40,10 @@ const streams = new Map();        // sessionId -> 对话页逐会话 SSE 状态
 const changeListeners = new Set();
 const pendingStubs = new Set();   // 初始列表加载期间由事件临时建出的任务
 const globalStream = { conn: null, timer: null, retryDelay: 1000, everOpened: false };
+const views = {};                 // filter -> { keys:[], cursor, loading, exhausted, started }
 let agents = null;                // { controller, workers, limits }
 let unauthorized = () => {};
 let initialLoading = false;
-let cursor = null;                // 下一页游标；null = 没有更多
-let loadingMore = false;
 
 export const TasksStore = {
   get agents() { return agents; },
@@ -68,18 +70,24 @@ export const TasksStore = {
   async start(sessionList) {
     for (const s of sessionList) titles.set(s.id, s.title);
     tasks.clear();
-    cursor = null;
+    for (const k of Object.keys(views)) delete views[k];
     initialLoading = true;
     openGlobalStream();
     try {
-      const [page, running] = await Promise.all([
-        api(`/api/tasks?limit=${PAGE}`),
+      const [, running] = await Promise.all([
+        this.loadView('all'),
         // 长时间运行的任务可能排在第一页之外，单独补齐全部进行中
         api('/api/tasks?status=running&limit=200').catch(() => null),
       ]);
-      for (const s of page?.tasks || []) upsertSummary(s);
-      for (const s of running?.tasks || []) upsertSummary(s);
-      cursor = page?.next_cursor ?? null;
+      // 运行中任务提最前（设计稿如此）：补进来的插入各视图头部
+      for (const s of (running?.tasks || []).slice().reverse()) {
+        upsertSummary(s);
+        const k = key(s.session_id, s.task_id);
+        for (const v of ['all', 'running']) {
+          const vw = views[v];
+          if (vw && !vw.keys.includes(k)) vw.keys.unshift(k);
+        }
+      }
     } catch (e) {
       console.error('任务列表加载失败', e);
     }
@@ -89,20 +97,44 @@ export const TasksStore = {
     emitChange();
   },
 
-  hasMore() { return cursor != null; },
-  isLoadingMore() { return loadingMore; },
-  async loadMore() {
-    if (cursor == null || loadingMore) return;
-    loadingMore = true;
+  /** 加载某筛选视图的下一页（首次调用拉第一页）。返回本页任务。 */
+  async loadView(view) {
+    const st = views[view] ??= { keys: [], cursor: null, loading: false, exhausted: false, started: false };
+    if (st.loading || st.exhausted) return [];
+    st.loading = true;
     emitChange();
     try {
-      const page = await api(`/api/tasks?limit=${PAGE}&cursor=${encodeURIComponent(cursor)}`);
-      for (const s of page?.tasks || []) upsertSummary(s);
-      cursor = page?.next_cursor ?? null;
+      const status = VIEW_STATUS[view] || '';
+      const q = `?limit=${PAGE}${status ? `&status=${status}` : ''}${st.cursor ? `&cursor=${encodeURIComponent(st.cursor)}` : ''}`;
+      const page = await api(`/api/tasks${q}`);
+      const items = page?.tasks || [];
+      for (const s of items) {
+        upsertSummary(s);
+        const k = key(s.session_id, s.task_id);
+        if (!st.keys.includes(k)) st.keys.push(k);
+      }
+      st.cursor = page?.next_cursor ?? null;
+      st.exhausted = st.cursor == null;
+      st.started = true;
+      return items;
     } finally {
-      loadingMore = false;
+      st.loading = false;
       emitChange();
     }
+  },
+
+  viewKeys(view) { return views[view]?.keys || []; },
+  viewState(view) {
+    const st = views[view];
+    return { hasMore: !!st && !st.exhausted, loading: !!st?.loading, started: !!st?.started };
+  },
+
+  /** 深链：按 key 拉详情建出任务（任务不在已加载列表里时用）。 */
+  async loadKey(k) {
+    const [sid, tid] = k.split(':');
+    if (!sid || tid == null) return;
+    const t = ensureTask(sid, Number(tid), null);
+    await loadDetail(t);
   },
 
   ensureDetail(k, force = false) {
@@ -306,7 +338,18 @@ async function resync() {
     ]);
     const live = new Set();
     for (const s of running?.tasks || []) { upsertSummary(s); live.add(key(s.session_id, s.task_id)); }
-    for (const s of page?.tasks || []) if (!live.has(key(s.session_id, s.task_id))) upsertSummary(s);
+    const fresh = [];
+    for (const s of page?.tasks || []) {
+      if (!live.has(key(s.session_id, s.task_id))) upsertSummary(s);
+      fresh.push(key(s.session_id, s.task_id));
+    }
+    // 「全部」视图用新第一页重建（断档期间可能错过了分页位置）
+    const vw = views.all;
+    if (vw?.started) {
+      vw.keys = [...new Set([...live, ...fresh, ...vw.keys.filter((k) => !fresh.includes(k))])];
+      vw.cursor = page?.next_cursor ?? vw.cursor;
+      vw.exhausted = vw.cursor == null;
+    }
     for (const t of tasks.values()) {
       if (t.status !== 'running') continue;
       if (!live.has(t.key)) loadDetail(t);
@@ -325,6 +368,11 @@ function handleEvent(name, d) {
   if (name === 'task_started') {
     const t = ensureTask(sid, d.task_id, d.worker);
     if (!t.summaryKnown) { t.task = d.task || ''; t.startedAt = Date.now(); t.summaryKnown = true; }
+    // 命中各已加载筛选的头部插入（all / running）
+    for (const v of ['all', 'running']) {
+      const vw = views[v];
+      if (vw?.started && !vw.keys.includes(t.key)) vw.keys.unshift(t.key);
+    }
     emitChange();
     return;
   }
@@ -520,3 +568,4 @@ function trackController(s, name, data) {
   s.controllerBusy = busy;
   emitChange();
 }
+

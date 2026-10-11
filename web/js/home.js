@@ -134,12 +134,13 @@ async function loadRecent() {
     count.textContent = '';
     list.textContent = '';
     if (!mems.length) {
-      list.append(h('div', { class: 'mem-empty', text: '还没有记忆' }));
+      list.append(h('div', { class: 'mem-empty', text: '暂无记忆' }));
       return;
     }
     for (const m of mems) {
       list.append(h('div', { class: 'mem' },
         h('span', { class: 'txt', text: m.content }),
+        visChip(m),
         h('span', { class: 'score', text: fmtRel(m.created_at_ms) }),
       ));
     }
@@ -154,6 +155,13 @@ async function loadRecent() {
       list.append(h('div', { class: 'mem-empty', text: e.message }));
     }
   }
+}
+
+/** 可见性小 chip：shared / public 显示，private 不显示。 */
+function visChip(m) {
+  if (m.visibility === 'shared') return h('span', { class: 'vis', text: '共享' });
+  if (m.visibility === 'public') return h('span', { class: 'vis pub', text: '公开' });
+  return null;
 }
 
 async function searchMemory(q) {
@@ -174,6 +182,7 @@ async function searchMemory(q) {
       barFill.style.width = `${Math.round(score * 100)}%`; // CSSOM 属性设置不受 CSP style-src 限制
       list.append(h('div', { class: 'mem' },
         h('span', { class: 'txt', text: m.content }),
+        visChip(m),
         h('span', { class: 'bar' }, barFill),
         h('span', { class: 'score', text: score.toFixed(2) }),
       ));
@@ -231,29 +240,24 @@ function renderConvHeader() {
 function clearColumn() {
   const col = document.getElementById('home-column');
   col.textContent = '';
-  col.append(h('div', { class: 'empty-hint', text: '写下第一句话，开始新的对话' }));
 }
 
 function renderHistory(history) {
   const col = document.getElementById('home-column');
   col.textContent = '';
-  let rendered = 0;
   for (const msg of history) {
     if (msg.role === 'user') {
       col.append(letter('user', '我', msg.content, null));
-      rendered++;
     } else if (msg.role === 'assistant') {
       // tool_calls 与 role=tool 一律不显示；reasoning 默认折叠
       if (msg.content) {
         col.append(assistantLetter(msg.content));
-        rendered++;
       }
       if (msg.reasoning) {
         col.append(reasoningBlock(msg.reasoning));
       }
     }
   }
-  if (!rendered) col.append(h('div', { class: 'empty-hint', text: '写下第一句话，开始新的对话' }));
 }
 
 function letter(kind, who, text, when) {
@@ -340,7 +344,6 @@ function startTurn() {
       h('span', { class: 'thinking-text', text: 'thought 正在思考…' }),
     ),
   );
-  removeEmptyHint();
   document.getElementById('home-column').append(indicator);
   scrollToBottom();
   turn = { indicatorEl: indicator, workers: new Set(), taskKeys: [], quietTimer: null, done: false };
@@ -405,17 +408,12 @@ function appendLagNote(n) {
 function showError(message) {
   const col = document.getElementById('home-column');
   if (!col) return;
-  removeEmptyHint();
   const bar = h('div', { class: 'err-banner' },
     h('span', { class: 'msg', text: message || '出错了' }),
     h('button', { class: 'x', type: 'button', text: '×', onclick() { bar.remove(); } }),
   );
   col.append(bar);
   scrollToBottom();
-}
-
-function removeEmptyHint() {
-  document.querySelector('#home-column .empty-hint')?.remove();
 }
 
 function scrollToBottom() {
@@ -473,7 +471,6 @@ function bindComposer() {
     }
     const sid = activeId;
 
-    removeEmptyHint();
     document.getElementById('home-column').append(letter('user', '我', content, fmtClock(Date.now())));
     startTurn();
     scrollToBottom();

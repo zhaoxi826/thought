@@ -146,7 +146,7 @@ body.frozen .curtain { visibility: visible; }
   align-items: baseline;
   justify-content: center;
   gap: 10px;
-  margin-bottom: 6px;
+  margin-bottom: 34px;
 }
 .login-brand .name {
   font-family: Georgia, "Songti SC", "Noto Serif CJK SC", "SimSun", serif;
@@ -159,13 +159,6 @@ body.frozen .curtain { visibility: visible; }
   background: #c2473a;
   border-radius: 50%;
   transform: translateY(-2px);
-}
-.login-sub {
-  text-align: center;
-  font-size: 11px;
-  letter-spacing: 0.28em;
-  color: #8a857b;
-  margin-bottom: 34px;
 }
 .login-field { margin-bottom: 14px; }
 .login-field input {

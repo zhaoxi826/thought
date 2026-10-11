@@ -1,5 +1,8 @@
 # thought 后端接口契约（待实现部分）
 
+> **已实现于 feat/agent-architecture，本文仅存档。** 实际行为以 `server/src/routes/tasks.rs`、
+> `server/src/routes/admin.rs`、`server/src/core/config_store.rs` 为准。
+
 > 面向后端接手人。本文档描述前端已经就位、但后端尚缺失的两组 API：**任务注册表**与**配置读写**。
 > 前端针对缺失部分做了适配层 + 优雅降级，后端落地本文档后，前端只需改适配层内部实现，UI 不动。
 >

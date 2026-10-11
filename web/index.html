@@ -18,7 +18,6 @@
       <span class="name">thought</span>
       <span class="seal"></span>
     </div>
-    <div class="login-sub">书 斋</div>
     <div class="login-field"><input type="text" id="login-user" autocomplete="username" placeholder="用户名" required></div>
     <div class="login-field"><input type="password" id="login-pass" autocomplete="current-password" placeholder="密码" required></div>
     <div class="login-err" id="login-err"></div>
@@ -81,7 +80,7 @@
           <span class="meta" id="memory-count"></span>
           <div class="pop" id="memory-pop">
             <div class="pop-title" id="memory-pop-title">最近记忆</div>
-            <input class="mem-search" id="memory-search" type="text" placeholder="搜索记忆……">
+            <input class="mem-search" id="memory-search" type="text" placeholder="搜索记忆">
             <div id="memory-list"></div>
           </div>
         </div>
@@ -106,7 +105,7 @@
       <footer>
         <div class="composer">
           <div class="box">
-            <textarea id="composer-input" rows="1" placeholder="继续这个话题……"></textarea>
+            <textarea id="composer-input" rows="1" placeholder="继续这个话题"></textarea>
           </div>
           <div class="send" id="composer-send">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#faf7f2" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -114,7 +113,6 @@
             </svg>
           </div>
         </div>
-        <div class="composer-hint">回车发送 · Shift + 回车换行</div>
       </footer>
     </main>
   </section>
@@ -148,7 +146,7 @@
 
       <!-- 详情主区 -->
       <div class="detail" id="task-detail">
-        <div class="detail-empty">选择左侧任务查看详情</div>
+        <div class="detail-empty">暂无任务</div>
       </div>
     </div>
   </section>
@@ -162,7 +160,7 @@
           <div class="page-title">设置<span class="path">thought.toml</span></div>
           <button class="save-btn" id="save-btn" type="button" disabled>保存</button>
         </div>
-        <div class="head-note" id="settings-note" role="status" aria-live="polite">部分修改需重启后生效</div>
+        <div class="head-note" id="settings-note" role="status" aria-live="polite"></div>
 
         <div class="view-tabs">
           <button class="view-tab active" id="tab-form" type="button">表单</button>
@@ -186,12 +184,11 @@
               <div class="field">
                 <label>静态前端目录<span class="key">web_dir</span></label>
                 <input type="text" class="placeholder" placeholder="—" disabled data-cfg="http.web_dir" aria-label="静态前端目录 web_dir">
-                <div class="hint">相对进程工作目录，同源托管在 /</div>
               </div>
             </div>
           </section>
 
-          <!-- 认证：密钥只显示 *_env 变量名 -->
+          <!-- 认证：*_env 是环境变量名（普通文本字段），密钥本体从不经过前端 -->
           <section class="card">
             <div class="card-head">
               <span class="card-title">认证</span>
@@ -201,16 +198,7 @@
             <div class="fields">
               <div class="field">
                 <label>JWT 密钥<span class="key">jwt_secret_env</span></label>
-                <div class="env-input placeholder" data-cfg-env="auth.jwt_secret_env">
-                  <span class="env-name">—</span>
-                  <span class="lock">
-                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
-                      <rect x="4" y="11" width="16" height="10" rx="2"/>
-                      <path d="M8 11V7a4 4 0 0 1 8 0v4"/>
-                    </svg>
-                  </span>
-                </div>
-                <div class="hint">至少 32 字节，如 openssl rand -hex 32</div>
+                <input type="text" class="placeholder" placeholder="—" disabled data-cfg="auth.jwt_secret_env" data-nullable aria-label="JWT 密钥 jwt_secret_env">
               </div>
               <div class="field">
                 <label>令牌有效期（秒）<span class="key">token_ttl_secs</span></label>
@@ -219,27 +207,11 @@
               <div class="field">
                 <label>初始管理员<span class="key">bootstrap_admin.username</span></label>
                 <input type="text" class="placeholder" placeholder="—" disabled data-cfg="auth.bootstrap_admin.username" aria-label="初始管理员 bootstrap_admin.username">
-                <div class="hint">首次启动且无用户时创建</div>
               </div>
               <div class="field">
                 <label>管理员密码<span class="key">bootstrap_admin.password_env</span></label>
-                <div class="env-input placeholder" data-cfg-env="auth.bootstrap_admin.password_env">
-                  <span class="env-name">—</span>
-                  <span class="lock">
-                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
-                      <rect x="4" y="11" width="16" height="10" rx="2"/>
-                      <path d="M8 11V7a4 4 0 0 1 8 0v4"/>
-                    </svg>
-                  </span>
-                </div>
+                <input type="text" class="placeholder" placeholder="—" disabled data-cfg="auth.bootstrap_admin.password_env" data-nullable aria-label="管理员密码 bootstrap_admin.password_env">
               </div>
-            </div>
-            <div class="env-note">
-              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
-                <circle cx="12" cy="12" r="9"/>
-                <path d="M12 8v5M12 16h.01"/>
-              </svg>
-              密钥通过环境变量注入，不会写入配置文件或界面
             </div>
           </section>
 
@@ -284,6 +256,10 @@
               <span class="right pending-note" data-note="memory"></span>
             </div>
             <div class="fields">
+              <div class="field span2">
+                <label>数据端点<span class="key">endpoint</span></label>
+                <input type="text" class="placeholder" placeholder="—" disabled data-cfg="memory.endpoint" aria-label="记忆数据端点 endpoint">
+              </div>
               <div class="field">
                 <label>命名空间<span class="key">namespace</span></label>
                 <input type="text" class="placeholder" placeholder="—" disabled data-cfg="memory.namespace" aria-label="记忆命名空间 namespace">
@@ -303,10 +279,20 @@
               <div class="field">
                 <label>半衰期（小时）<span class="key">half_life_hours</span></label>
                 <input type="text" class="placeholder" placeholder="—" disabled data-cfg="memory.half_life_hours" data-type="float" aria-label="半衰期（小时） half_life_hours">
-                <div class="hint">记忆随时间衰减，检索时按新鲜度加权</div>
               </div>
               <div class="field">
-                <label>&nbsp;</label>
+                <label>冻结阈值<span class="key">inactive_threshold</span></label>
+                <input type="text" class="placeholder" placeholder="—" disabled data-cfg="memory.inactive_threshold" data-type="float" aria-label="冻结阈值 inactive_threshold">
+              </div>
+              <div class="field">
+                <label>清理阈值<span class="key">prune_threshold</span></label>
+                <input type="text" class="placeholder" placeholder="—" disabled data-cfg="memory.prune_threshold" data-type="float" aria-label="清理阈值 prune_threshold">
+              </div>
+              <div class="field">
+                <label>最低置信度<span class="key">min_confidence</span></label>
+                <input type="text" class="placeholder" placeholder="—" disabled data-cfg="memory.min_confidence" data-type="float" aria-label="最低置信度 min_confidence">
+              </div>
+              <div class="field">
                 <div class="switch-row">
                   <span class="switch readonly" data-cfg-switch="memory.per_user"></span>
                   <span class="sw-label">每用户独立记忆空间</span>
@@ -316,6 +302,49 @@
                   <span class="switch readonly" data-cfg-switch="memory.save_user_messages"></span>
                   <span class="sw-label">自动写入用户消息</span>
                   <span class="sw-key">save_user_messages</span>
+                </div>
+              </div>
+            </div>
+            <div class="subsec">
+              <div class="subsec-head" data-subsec>检索参数<span class="key">memory.retrieval</span><span class="chev">▸</span></div>
+              <div class="subsec-body">
+                <div class="fields">
+                  <div class="field">
+                    <label>语义候选数<span class="key">semantic_top_k</span></label>
+                    <input type="text" class="placeholder" placeholder="—" disabled data-cfg="memory.retrieval.semantic_top_k" data-type="int" aria-label="语义候选数 semantic_top_k">
+                  </div>
+                  <div class="field">
+                    <label>全文候选数<span class="key">sparse_top_k</span></label>
+                    <input type="text" class="placeholder" placeholder="—" disabled data-cfg="memory.retrieval.sparse_top_k" data-type="int" aria-label="全文候选数 sparse_top_k">
+                  </div>
+                  <div class="field">
+                    <label>图候选数<span class="key">graph_top_k</span></label>
+                    <input type="text" class="placeholder" placeholder="—" disabled data-cfg="memory.retrieval.graph_top_k" data-type="int" aria-label="图候选数 graph_top_k">
+                  </div>
+                  <div class="field">
+                    <label>语义权重<span class="key">semantic_weight</span></label>
+                    <input type="text" class="placeholder" placeholder="—" disabled data-cfg="memory.retrieval.semantic_weight" data-type="float" aria-label="语义权重 semantic_weight">
+                  </div>
+                  <div class="field">
+                    <label>全文权重<span class="key">sparse_weight</span></label>
+                    <input type="text" class="placeholder" placeholder="—" disabled data-cfg="memory.retrieval.sparse_weight" data-type="float" aria-label="全文权重 sparse_weight">
+                  </div>
+                  <div class="field">
+                    <label>图权重<span class="key">graph_weight</span></label>
+                    <input type="text" class="placeholder" placeholder="—" disabled data-cfg="memory.retrieval.graph_weight" data-type="float" aria-label="图权重 graph_weight">
+                  </div>
+                  <div class="field">
+                    <label>绝对下限<span class="key">min_score</span></label>
+                    <input type="text" class="placeholder" placeholder="—" disabled data-cfg="memory.retrieval.min_score" data-type="float" aria-label="绝对下限 min_score">
+                  </div>
+                  <div class="field">
+                    <label>相对截断<span class="key">relative_cutoff</span></label>
+                    <input type="text" class="placeholder" placeholder="—" disabled data-cfg="memory.retrieval.relative_cutoff" data-type="float" aria-label="相对截断 relative_cutoff">
+                  </div>
+                  <div class="field">
+                    <label>访问冷却（毫秒）<span class="key">access_cooldown_ms</span></label>
+                    <input type="text" class="placeholder" placeholder="—" disabled data-cfg="memory.retrieval.access_cooldown_ms" data-type="int" aria-label="访问冷却（毫秒） access_cooldown_ms">
+                  </div>
                 </div>
               </div>
             </div>
@@ -347,6 +376,210 @@
               <div class="field">
                 <label>输出字符上限<span class="key">max_tool_output_chars</span></label>
                 <input type="text" class="placeholder" placeholder="—" disabled data-cfg="agent.limits.max_tool_output_chars" data-type="int" aria-label="输出字符上限 max_tool_output_chars">
+              </div>
+            </div>
+          </section>
+
+          <!-- 沙盒 -->
+          <section class="card">
+            <div class="card-head">
+              <span class="card-title">沙盒</span>
+              <span class="card-tag">[sandbox]</span>
+              <span class="right pending-note" data-note="sandbox"></span>
+            </div>
+            <div class="fields">
+              <div class="field">
+                <label>工作区<span class="key">workspace</span></label>
+                <input type="text" class="placeholder" placeholder="—" disabled data-cfg="sandbox.workspace" aria-label="工作区 workspace">
+              </div>
+              <div class="field">
+                <label>回收站<span class="key">trash</span></label>
+                <input type="text" class="placeholder" placeholder="—" disabled data-cfg="sandbox.trash" aria-label="回收站 trash">
+              </div>
+              <div class="field">
+                <label>备份目录<span class="key">backup</span></label>
+                <input type="text" class="placeholder" placeholder="—" disabled data-cfg="sandbox.backup" aria-label="备份目录 backup">
+              </div>
+              <div class="field">
+                <div class="switch-row">
+                  <span class="switch readonly" data-cfg-switch="sandbox.network"></span>
+                  <span class="sw-label">命令允许联网</span>
+                  <span class="sw-key">network</span>
+                </div>
+              </div>
+              <div class="field span2">
+                <label>受保护路径（一行一个）<span class="key">protected</span></label>
+                <textarea rows="2" disabled data-cfg-lines="sandbox.protected" aria-label="受保护路径 protected"></textarea>
+              </div>
+              <div class="field">
+                <label>命令超时（秒）<span class="key">command_timeout_secs</span></label>
+                <input type="text" class="placeholder" placeholder="—" disabled data-cfg="sandbox.command_timeout_secs" data-type="int" aria-label="命令超时（秒） command_timeout_secs">
+              </div>
+              <div class="field">
+                <label>命令输出上限（字节）<span class="key">max_output_bytes</span></label>
+                <input type="text" class="placeholder" placeholder="—" disabled data-cfg="sandbox.max_output_bytes" data-type="int" aria-label="命令输出上限（字节） max_output_bytes">
+              </div>
+              <div class="field">
+                <label>读文件上限（字节）<span class="key">max_read_bytes</span></label>
+                <input type="text" class="placeholder" placeholder="—" disabled data-cfg="sandbox.max_read_bytes" data-type="int" aria-label="读文件上限（字节） max_read_bytes">
+              </div>
+            </div>
+          </section>
+
+          <!-- 预算 -->
+          <section class="card">
+            <div class="card-head">
+              <span class="card-title">预算</span>
+              <span class="card-tag">[budget]</span>
+              <span class="right pending-note" data-note="budget"></span>
+            </div>
+            <div class="fields">
+              <div class="field">
+                <label>单日软额度（tokens）<span class="key">daily_soft_tokens</span></label>
+                <input type="text" class="placeholder" placeholder="—" disabled data-cfg="budget.daily_soft_tokens" data-type="int" aria-label="单日软额度 daily_soft_tokens">
+              </div>
+              <div class="field">
+                <label>单日硬上限（tokens）<span class="key">daily_hard_tokens</span></label>
+                <input type="text" class="placeholder" placeholder="—" disabled data-cfg="budget.daily_hard_tokens" data-type="int" aria-label="单日硬上限 daily_hard_tokens">
+              </div>
+            </div>
+          </section>
+
+          <!-- 心智：mind 为 null 时整卡只读「未启用」 -->
+          <section class="card">
+            <div class="card-head">
+              <span class="card-title">心智</span>
+              <span class="card-tag">[mind]</span>
+              <span class="right pending-note" data-note="mind"></span>
+            </div>
+            <div class="fields">
+              <div class="field">
+                <div class="switch-row">
+                  <span class="switch readonly" data-cfg-switch="mind.enabled"></span>
+                  <span class="sw-label">启用心智</span>
+                  <span class="sw-key">enabled</span>
+                </div>
+              </div>
+              <div class="field">
+                <label>思考模型<span class="key">model</span></label>
+                <input type="text" class="placeholder" placeholder="—" disabled data-cfg="mind.model" aria-label="思考模型 model">
+              </div>
+              <div class="field">
+                <label>摘要模型<span class="key">summary_model</span></label>
+                <input type="text" class="placeholder" placeholder="—" disabled data-cfg="mind.summary_model" data-nullable aria-label="摘要模型 summary_model">
+              </div>
+              <div class="field">
+                <label>回合工具轮数<span class="key">max_turns</span></label>
+                <input type="text" class="placeholder" placeholder="—" disabled data-cfg="mind.max_turns" data-type="int" aria-label="回合工具轮数 max_turns">
+              </div>
+              <div class="field">
+                <label>工作记忆条数<span class="key">working_memory</span></label>
+                <input type="text" class="placeholder" placeholder="—" disabled data-cfg="mind.working_memory" data-type="int" aria-label="工作记忆条数 working_memory">
+              </div>
+              <div class="field">
+                <label>压缩触发条数<span class="key">compact_at</span></label>
+                <input type="text" class="placeholder" placeholder="—" disabled data-cfg="mind.compact_at" data-type="int" aria-label="压缩触发条数 compact_at">
+              </div>
+              <div class="field">
+                <label>摘要段数<span class="key">summaries</span></label>
+                <input type="text" class="placeholder" placeholder="—" disabled data-cfg="mind.summaries" data-type="int" aria-label="摘要段数 summaries">
+              </div>
+              <div class="field">
+                <label>回想条数<span class="key">recall</span></label>
+                <input type="text" class="placeholder" placeholder="—" disabled data-cfg="mind.recall" data-type="int" aria-label="回想条数 recall">
+              </div>
+              <div class="field">
+                <label>时区偏移（分钟）<span class="key">tz_offset_min</span></label>
+                <input type="text" class="placeholder" placeholder="—" disabled data-cfg="mind.tz_offset_min" data-type="int" aria-label="时区偏移（分钟） tz_offset_min">
+              </div>
+              <div class="field">
+                <label>感知队列容量<span class="key">inbox_capacity</span></label>
+                <input type="text" class="placeholder" placeholder="—" disabled data-cfg="mind.inbox_capacity" data-type="int" aria-label="感知队列容量 inbox_capacity">
+              </div>
+              <div class="field">
+                <label>熔断阈值<span class="key">breaker_threshold</span></label>
+                <input type="text" class="placeholder" placeholder="—" disabled data-cfg="mind.breaker_threshold" data-type="int" aria-label="熔断阈值 breaker_threshold">
+              </div>
+            </div>
+            <div class="subsec">
+              <div class="subsec-head" data-subsec>出身<span class="key">mind.origin</span><span class="chev">▸</span></div>
+              <div class="subsec-body">
+                <div class="fields fields-3">
+                  <div class="field">
+                    <label>名字<span class="key">name</span></label>
+                    <input type="text" class="placeholder" placeholder="—" disabled data-cfg="mind.origin.name" aria-label="出身名字 name">
+                  </div>
+                  <div class="field">
+                    <label>性别<span class="key">gender</span></label>
+                    <input type="text" class="placeholder" placeholder="—" disabled data-cfg="mind.origin.gender" aria-label="出身性别 gender">
+                  </div>
+                  <div class="field">
+                    <label>生日<span class="key">birthday</span></label>
+                    <input type="text" class="placeholder" placeholder="—" disabled data-cfg="mind.origin.birthday" aria-label="出身生日 birthday">
+                  </div>
+                </div>
+                <div class="field span2 mt8">
+                  <label>醒来的第一句话<span class="key">seed</span></label>
+                  <textarea rows="2" disabled data-cfg-area="mind.origin.seed" aria-label="醒来的第一句话 seed"></textarea>
+                </div>
+              </div>
+            </div>
+            <div class="subsec">
+              <div class="subsec-head" data-subsec>心跳<span class="key">mind.heart</span><span class="chev">▸</span></div>
+              <div class="subsec-body">
+                <div class="fields">
+                  <div class="field">
+                    <label>每拍间隔（秒）<span class="key">interval_secs</span></label>
+                    <input type="text" class="placeholder" placeholder="—" disabled data-cfg="mind.heart.interval_secs" data-type="int" aria-label="每拍间隔（秒） interval_secs">
+                  </div>
+                  <div class="field">
+                    <label>点火阈值<span class="key">threshold</span></label>
+                    <input type="text" class="placeholder" placeholder="—" disabled data-cfg="mind.heart.threshold" data-type="float" aria-label="点火阈值 threshold">
+                  </div>
+                  <div class="field">
+                    <label>最小间隔（秒）<span class="key">min_gap_secs</span></label>
+                    <input type="text" class="placeholder" placeholder="—" disabled data-cfg="mind.heart.min_gap_secs" data-type="int" aria-label="最小间隔（秒） min_gap_secs">
+                  </div>
+                  <div class="field">
+                    <label>疲劳增益<span class="key">fatigue_gain</span></label>
+                    <input type="text" class="placeholder" placeholder="—" disabled data-cfg="mind.heart.fatigue_gain" data-type="float" aria-label="疲劳增益 fatigue_gain">
+                  </div>
+                  <div class="field">
+                    <label>回合后安静（秒）<span class="key">settle_secs</span></label>
+                    <input type="text" class="placeholder" placeholder="—" disabled data-cfg="mind.heart.settle_secs" data-type="int" aria-label="回合后安静（秒） settle_secs">
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="subsec">
+              <div class="subsec-head" data-subsec>驱动<span class="key">mind.drives</span><span class="chev">▸</span></div>
+              <div class="subsec-body">
+                <div class="fields">
+                  <div class="field">
+                    <label>想念 τ（小时）<span class="key">missing_tau_h</span></label>
+                    <input type="text" class="placeholder" placeholder="—" disabled data-cfg="mind.drives.missing_tau_h" data-type="float" aria-label="想念 τ missing_tau_h">
+                  </div>
+                  <div class="field">
+                    <label>亲密度满值次数<span class="key">missing_intimacy_at</span></label>
+                    <input type="text" class="placeholder" placeholder="—" disabled data-cfg="mind.drives.missing_intimacy_at" data-type="float" aria-label="亲密度满值次数 missing_intimacy_at">
+                  </div>
+                  <div class="field">
+                    <label>好奇 τ（小时）<span class="key">curiosity_tau_h</span></label>
+                    <input type="text" class="placeholder" placeholder="—" disabled data-cfg="mind.drives.curiosity_tau_h" data-type="float" aria-label="好奇 τ curiosity_tau_h">
+                  </div>
+                  <div class="field">
+                    <label>自己的事 τ（小时）<span class="key">project_tau_h</span></label>
+                    <input type="text" class="placeholder" placeholder="—" disabled data-cfg="mind.drives.project_tau_h" data-type="float" aria-label="自己的事 τ project_tau_h">
+                  </div>
+                  <div class="field">
+                    <label>整理 τ（条）<span class="key">tidy_tau</span></label>
+                    <input type="text" class="placeholder" placeholder="—" disabled data-cfg="mind.drives.tidy_tau" data-type="float" aria-label="整理 τ tidy_tau">
+                  </div>
+                  <div class="field">
+                    <label>分享 τ（条）<span class="key">share_tau</span></label>
+                    <input type="text" class="placeholder" placeholder="—" disabled data-cfg="mind.drives.share_tau" data-type="float" aria-label="分享 τ share_tau">
+                  </div>
+                </div>
               </div>
             </div>
           </section>
