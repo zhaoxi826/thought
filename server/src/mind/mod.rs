@@ -9,7 +9,7 @@ use crate::core::budget::Budget;
 use crate::core::db::Db;
 use crate::core::tasks::TaskRegistry;
 use agent::{AgentSystem, Observers, SessionOptions, Workforce};
-use mind::{Mind, MindConfig, Percept, Ports, SystemClock};
+use mind::{Heart, HeartPorts, Mind, MindConfig, Percept, Ports, SystemClock};
 use plugin::Registry;
 use ports::*;
 use serde::{Deserialize, Serialize};
@@ -36,6 +36,14 @@ pub struct MindSection {
     #[serde(default = "default_turns")]
     pub max_turns: usize,
 
+    /// 心跳参数。
+    #[serde(default)]
+    pub heart: mind::HeartConfig,
+
+    /// 驱动参数。
+    #[serde(default)]
+    pub drives: mind::DriveParams,
+
     /// 心智参数（出身、工作记忆、时区……）。
     #[serde(flatten)]
     pub core: MindConfig,
@@ -53,6 +61,7 @@ fn default_turns() -> usize {
 #[derive(Clone)]
 pub struct MindHandle {
     pub mind: Mind,
+    pub heart: Heart,
     pub db: Arc<MindDb>,
     pub web: WebExpression,
     pub workforce: Arc<Workforce>,
@@ -134,6 +143,9 @@ pub async fn start(
     mind_tools.extend(&workforce.tools());
 
     let web = WebExpression::new();
+    let memory_port = memory.map(|m| Arc::new(MemoryAdapter(m)) as Arc<dyn mind::MemoryPort>);
+    let metabolism: Arc<dyn mind::Metabolism> = Arc::new(MetabolismAdapter(budget.clone()));
+    let people: Arc<dyn mind::People> = Arc::new(PeopleAdapter(users));
     let events = agent::EventSender::with_observer(RESPONSIVE_SESSION, 1024, Some(observer));
     let limits = &config.agent.limits;
     let mind = Mind::start(
@@ -141,11 +153,11 @@ pub async fn start(
         Ports {
             stream: db.clone(),
             selves: db.clone(),
-            memory: memory.map(|m| Arc::new(MemoryAdapter(m)) as Arc<dyn mind::MemoryPort>),
+            memory: memory_port.clone(),
             expression: Arc::new(web.clone()),
-            metabolism: Arc::new(MetabolismAdapter(budget.clone())),
+            metabolism: Arc::clone(&metabolism),
             auditor: Arc::new(AuditAdapter(db.clone())),
-            people: Arc::new(PeopleAdapter(users)),
+            people: Arc::clone(&people),
             cognition: Arc::new(RunnerCognition {
                 model,
                 max_turns: section.max_turns,
@@ -188,5 +200,28 @@ pub async fn start(
         }
     });
 
-    Ok(MindHandle { mind, db, web, workforce })
+    // 心跳：从持久化恢复各驱动上次被满足的时间，定期写回
+    let satisfied = db.drive_memory().await;
+    let heart = Heart::start(
+        mind.clone(),
+        mind::drives::all(&section.drives),
+        section.heart.clone(),
+        HeartPorts { memory: memory_port, metabolism, expression: Arc::new(web.clone()), clock: Arc::new(SystemClock), people },
+        satisfied,
+    );
+    let (h, store) = (heart.clone(), db.clone());
+    tokio::spawn(async move {
+        let mut tick = tokio::time::interval(Duration::from_secs(60));
+        let mut last = std::collections::BTreeMap::new();
+        loop {
+            tick.tick().await;
+            let now = h.state().last_satisfied_ms;
+            if now != last {
+                store.save_drive_memory(&now).await;
+                last = now;
+            }
+        }
+    });
+
+    Ok(MindHandle { mind, heart, db, web, workforce })
 }

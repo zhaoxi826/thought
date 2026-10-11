@@ -108,6 +108,17 @@ impl MindDb {
             .map_err(ApiError::internal)
     }
 
+    /// 各驱动上次被满足的时间（心跳重启后恢复，避免一启动就全部点火）。
+    pub async fn drive_memory(&self) -> std::collections::BTreeMap<String, i64> {
+        self.state("drive_satisfied").await.unwrap_or_default()
+    }
+
+    pub async fn save_drive_memory(&self, value: &std::collections::BTreeMap<String, i64>) {
+        if let Err(e) = self.set_state("drive_satisfied", value).await {
+            tracing::warn!("save drive memory failed: {e}");
+        }
+    }
+
     pub async fn record_audit(&self, entry: Json) {
         if let Err(e) = self.exec("CREATE audit CONTENT $data", json!({ "data": entry })).await {
             tracing::warn!("audit write failed: {e}");

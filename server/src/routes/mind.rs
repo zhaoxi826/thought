@@ -159,6 +159,7 @@ pub(super) async fn status(State(state): State<AppState>, _: AuthUser) -> Result
         "projects": model.projects.iter().filter(|p| p.status == "active").map(|p| &p.title).collect::<Vec<_>>(),
         "budget": state.budget().status(),
         "tasks": handle.workforce.tasks(),
+        "heart": handle.heart.state(),
     })))
 }
 

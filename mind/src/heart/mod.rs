@@ -1,5 +1,7 @@
 //! 驱动接口：压力完全由真实信号计算；心跳只做零 token 的判断（docs/mind-design.md §3）。
 
+pub mod beat;
+
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 

@@ -8,6 +8,7 @@
 //! 设计见 `docs/mind-design.md`。
 
 pub mod core;
+pub mod drives;
 pub mod heart;
 pub mod self_model;
 pub mod tools;
@@ -18,5 +19,7 @@ pub use core::ports::{
     Recollection, Scheduled, SelfChange, SelfStore, StreamStore, SystemClock, TurnKind,
 };
 pub use core::stream::{Expressed, Moment, MomentBody, Percept, Person, Summary};
+pub use drives::DriveParams;
+pub use heart::beat::{DriveReading, Heart, HeartConfig, HeartPorts, HeartState};
 pub use heart::{Drive, DriveKind, Outcome, Signals, Urge};
 pub use self_model::{Acquaintance, Interest, Mood, Origin, Project, SelfModel};

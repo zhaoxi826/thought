@@ -89,6 +89,17 @@ working_memory = 60              # 上下文里保留的最近原文条数
 compact_at = 80                  # 超过后把最早一半压成摘要
 tz_offset_min = 480              # UTC+8
 
+[mind.heart]                     # 心跳：每拍零 token，只算压力
+interval_secs = 5
+threshold = 0.6                  # 驱动压力超过它（并受疲劳抬升）才会醒来
+min_gap_secs = 120               # 两次自主醒来至少间隔
+settle_secs = 30                 # 一个回合结束后先安静一会儿
+
+[mind.drives]                    # 各驱动的时间常数（小时）
+missing_tau_h = 24               # 想念：多久没见开始想
+curiosity_tau_h = 8              # 好奇
+project_tau_h = 12               # 自己的事
+
 [mind.origin]                    # 她的出身：只有你能改
 name = "思想"
 gender = "女"

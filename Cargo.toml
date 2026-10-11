@@ -40,3 +40,10 @@ inherits = "release"
 strip = true
 lto = "thin"
 codegen-units = 1
+
+# 开发构建：依赖不带调试信息（SurrealDB 体积大，否则 target/ 很快涨到 25G+ 撑满 /data）
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+debug = false

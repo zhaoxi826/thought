@@ -177,4 +177,6 @@ async fn she_hears_answers_and_her_inner_life_is_transparent_with_step_up() {
     assert!(status["identity"].as_str().unwrap().starts_with("我叫思想"), "{status}");
     assert_eq!(status["budget"]["by_origin"]["user"]["calls"], 2, "her answer turn counts as user-origin: {status}");
     assert_eq!(status["budget"]["by_origin"]["mind"]["calls"], 1, "waking up is her own: {status}");
+    let drives: Vec<&str> = status["heart"]["readings"].as_array().unwrap().iter().map(|r| r["name"].as_str().unwrap()).collect();
+    assert_eq!(drives, ["missing", "share", "curiosity", "project", "tidy"], "{status}");
 }
