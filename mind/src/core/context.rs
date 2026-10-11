@@ -111,6 +111,8 @@ pub struct ContextParts<'a> {
     /// 当前在线的人（显示名）。
     pub present: &'a [String],
     pub names: &'a Names,
+    /// 她的身体与环境（由宿主描述：工作区、浏览器、可用能力……）。
+    pub body: &'a str,
 }
 
 pub fn system_prompt(p: &ContextParts) -> String {
@@ -138,6 +140,11 @@ pub fn system_prompt(p: &ContextParts) -> String {
         birthday = p.origin.birthday,
     );
 
+    if !p.body.is_empty() {
+        s.push_str("## 你的身体与环境\n");
+        s.push_str(p.body.trim_end());
+        s.push_str("\n\n");
+    }
     s.push_str("## 你现在对自己的认识\n");
     s.push_str(&format!("{}\n", p.self_model.identity));
     if !p.self_model.values.is_empty() {
@@ -235,11 +242,13 @@ mod tests {
             }],
             present: &["zhaoxi".to_owned()],
             names: &names,
+            body: "你有一个工作区。",
         });
         assert!(prompt.contains("你是思想，女，出生于 2026-10-11。今天是 2026-10-12，你出生的第 2 天。"), "{prompt}");
         assert!(prompt.contains("我叫思想"));
         assert!(prompt.contains("- zhaoxi（id u1），上次说话 1 天 前"), "{prompt}");
         assert!(prompt.contains("[private，关于 zhaoxi] 他喜欢 Rust"), "{prompt}");
         assert!(prompt.contains("现在在线：zhaoxi"));
+        assert!(prompt.contains("## 你的身体与环境\n你有一个工作区。"));
     }
 }

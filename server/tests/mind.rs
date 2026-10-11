@@ -141,6 +141,8 @@ async fn she_hears_answers_and_her_inner_life_is_transparent_with_step_up() {
     assert!(turn2.contains("你是思想，女，出生于 2026-10-11"), "{turn2}");
     assert!(turn2.contains("admin] 你好呀") && turn2.contains("现在在线：admin"), "{turn2}");
     assert!(turn2.contains("\"say\""), "say tool offered");
+    assert!(turn2.contains("你的身体与环境") && turn2.contains("你有自己的工作区"), "she knows her body");
+    assert!(turn2.contains("6. 分辨"), "constitution includes discernment");
 
     // 你的对话视图：只有你们之间的话，不含她的心里话
     tokio::time::sleep(Duration::from_millis(200)).await;
@@ -210,6 +212,7 @@ async fn she_gets_browser_tools_and_her_profile_is_protected() {
     for t in ["browser_navigate", "browser_snapshot", "browser_click", "browser_type", "browser_eval", "browser_cdp", "browser_screenshot"] {
         assert!(reqs[0].contains(&format!("\"{t}\"")), "{t} offered");
     }
+    assert!(reqs[0].contains("只属于你的浏览器"), "she knows she has a browser");
     // profile 在工作区里，但 shell / 文件工具碰不到
     let profile = dir.join("data/mind/workspace/.browser/profile");
     assert!(profile.is_dir(), "profile created under her workspace");

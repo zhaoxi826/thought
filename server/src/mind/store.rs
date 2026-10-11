@@ -108,6 +108,17 @@ impl MindDb {
             .map_err(ApiError::internal)
     }
 
+    /// 上次运行时她用的模型（用来发现"换脑"）。
+    pub async fn last_model(&self) -> Option<String> {
+        self.state::<Option<String>>("model").await.ok().flatten()
+    }
+
+    pub async fn set_last_model(&self, model: &str) {
+        if let Err(e) = self.set_state("model", &Some(model)).await {
+            tracing::warn!("save model id failed: {e}");
+        }
+    }
+
     /// 各驱动上次被满足的时间（心跳重启后恢复，避免一启动就全部点火）。
     pub async fn drive_memory(&self) -> std::collections::BTreeMap<String, i64> {
         self.state("drive_satisfied").await.unwrap_or_default()

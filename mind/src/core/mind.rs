@@ -32,6 +32,9 @@ pub struct MindConfig {
     pub inbox_capacity: usize,
     /// 连续失败多少次后熔断退避。
     pub breaker_threshold: u32,
+    /// 她的身体与环境（宿主填写，注入 system）。
+    #[serde(skip)]
+    pub body: String,
 }
 
 impl Default for MindConfig {
@@ -45,6 +48,7 @@ impl Default for MindConfig {
             tz_offset_min: 8 * 60,
             inbox_capacity: 256,
             breaker_threshold: 3,
+            body: String::new(),
         }
     }
 }
@@ -288,6 +292,7 @@ impl Core {
             recollections: &recollections,
             present: &present,
             names: &names,
+            body: &self.config.body,
         });
         let attended = fresh.first().map_or(u64::MAX, |m| m.seq);
         let mut stream_text = String::new();
