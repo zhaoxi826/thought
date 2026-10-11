@@ -137,7 +137,7 @@ impl MemoryStore {
     pub async fn get(&self, id: &str) -> Result<Option<Memory>, MemoryError> {
         let rows: Vec<ParagraphRow> = self
             .query(
-                "SELECT meta::id(id) AS id, content, source, tags, created_at_ms
+                "SELECT meta::id(id) AS id, content, source, tags, created_at_ms, about, visibility
                  FROM type::record('paragraph', $id)",
                 json!({ "id": id }),
             )
@@ -149,7 +149,7 @@ impl MemoryStore {
     pub async fn recent(&self, limit: usize) -> Result<Vec<Memory>, MemoryError> {
         let rows: Vec<ParagraphRow> = self
             .query(
-                "SELECT meta::id(id) AS id, content, source, tags, created_at_ms FROM paragraph
+                "SELECT meta::id(id) AS id, content, source, tags, created_at_ms, about, visibility FROM paragraph
                  ORDER BY created_at_ms DESC LIMIT $limit",
                 json!({ "limit": limit }),
             )
@@ -169,6 +169,17 @@ impl MemoryStore {
             .map(|rows: Vec<Json>| rows.iter().map(|r| r.to_string()).collect())?;
         self.detach_paragraphs(&[id.to_owned()]).await?;
         Ok(!deleted.is_empty())
+    }
+
+    /// 修改可见性（当事人授权转述等）；不存在时返回 `false`。
+    pub async fn set_visibility(&self, id: &str, visibility: Visibility) -> Result<bool, MemoryError> {
+        let updated: Vec<String> = self
+            .query(
+                "UPDATE type::record('paragraph', $id) SET visibility = $visibility RETURN VALUE meta::id(id)",
+                json!({ "id": id, "visibility": visibility }),
+            )
+            .await?;
+        Ok(!updated.is_empty())
     }
 
     /// 按来源批量删除，返回删除的段落数。
@@ -270,6 +281,8 @@ impl MemoryStore {
                     "source": request.source,
                     "external_id": request.external_id,
                     "tags": request.tags,
+                    "about": request.about,
+                    "visibility": request.visibility,
                     "created_at_ms": now_ms(),
                     // false = 待抽取；true = 已抽取或不需要
                     "extracted": !extract,

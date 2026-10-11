@@ -18,4 +18,5 @@ pub use memory::store::MemoryStore;
 pub use memory::tools::register_memory_tools;
 pub use memory::types::{
     ChannelScores, IngestRequest, IngestResult, Memory, MemoryHit, MemoryStats, RelationView,
+    Visibility,
 };

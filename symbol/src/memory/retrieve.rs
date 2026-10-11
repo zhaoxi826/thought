@@ -193,7 +193,7 @@ impl MemoryStore {
         let ids: Vec<&String> = ranked.iter().map(|r| &r.0).collect();
         let rows: Vec<ParagraphRow> = self
             .query_rows(
-                "SELECT meta::id(id) AS id, content, source, tags, created_at_ms FROM paragraph
+                "SELECT meta::id(id) AS id, content, source, tags, created_at_ms, about, visibility FROM paragraph
                  WHERE meta::id(id) IN $ids",
                 json!({ "ids": ids }),
             )
@@ -216,6 +216,8 @@ impl MemoryStore {
                     source: row.source,
                     tags: row.tags,
                     created_at_ms: row.created_at_ms,
+                    about: row.about,
+                    visibility: row.visibility,
                     score,
                     channels,
                     relations: labels,

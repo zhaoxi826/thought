@@ -1,13 +1,13 @@
-//! 给 agent 用的记忆工具：`memory_search` / `memory_save` / `memory_forget`。
+//! 给 agent 用的记忆工具：`memory_search` / `memory_save` / `memory_forget` / `memory_share`。
 
 use crate::memory::store::MemoryStore;
-use crate::memory::types::IngestRequest;
+use crate::memory::types::{IngestRequest, Visibility};
 use model::{Function, Parameter, ParameterType};
 use plugin::{Registry, Tool};
 use serde::Deserialize;
 use std::sync::Arc;
 
-/// 注册三个记忆工具。`source` 标记经工具写入的记忆来源（如 `agent`）。
+/// 注册四个记忆工具。`source` 标记经工具写入的记忆来源（如 `agent`）。
 pub fn register_memory_tools(registry: &mut Registry, store: MemoryStore, source: &str) {
     registry
         .register(Arc::new(MemorySearch(store.clone())))
@@ -15,7 +15,16 @@ pub fn register_memory_tools(registry: &mut Registry, store: MemoryStore, source
             store: store.clone(),
             source: source.to_owned(),
         }))
+        .register(Arc::new(MemoryShare(store.clone())))
         .register(Arc::new(MemoryForget(store)));
+}
+
+fn visibility_label(v: Visibility) -> &'static str {
+    match v {
+        Visibility::Private => "private",
+        Visibility::Shared => "shared",
+        Visibility::Public => "public",
+    }
 }
 
 struct MemorySearch(MemoryStore);
@@ -59,7 +68,14 @@ impl Tool for MemorySearch {
             Ok(hits) => hits
                 .iter()
                 .map(|h| {
-                    let mut line = format!("[{}] (score {:.2}) {}", h.id, h.score, h.content);
+                    let about = if h.about.is_empty() { String::new() } else { format!(" about {}", h.about.join(",")) };
+                    let mut line = format!(
+                        "[{}] (score {:.2}, {}{about}) {}",
+                        h.id,
+                        h.score,
+                        visibility_label(h.visibility),
+                        h.content
+                    );
                     if !h.relations.is_empty() {
                         line.push_str(&format!("\n  facts: {}", h.relations.join("; ")));
                     }
@@ -82,6 +98,10 @@ struct SaveArgs {
     content: String,
     #[serde(default)]
     tags: Vec<String>,
+    #[serde(default)]
+    about: Vec<String>,
+    #[serde(default)]
+    visibility: Visibility,
 }
 
 #[async_trait::async_trait]
@@ -99,6 +119,16 @@ impl Tool for MemorySave {
             parameters: vec![
                 Parameter::required("content", "The statement to remember", ParameterType::String),
                 Parameter::optional("tags", "Optional tags (array of strings)", ParameterType::Array),
+                Parameter::optional(
+                    "about",
+                    "Who this is about or who told you, e.g. [\"user:<id>\"] (array of strings)",
+                    ParameterType::Array,
+                ),
+                Parameter::optional(
+                    "visibility",
+                    "private (default: someone's personal matter), shared (they said it can be told), public",
+                    ParameterType::String,
+                ),
             ],
             strict: false,
         }
@@ -109,7 +139,11 @@ impl Tool for MemorySave {
             Ok(a) => a,
             Err(e) => return format!("invalid arguments for memory_save: {e}"),
         };
-        let request = IngestRequest::new(args.content).source(&self.source).tags(args.tags);
+        let request = IngestRequest::new(args.content)
+            .source(&self.source)
+            .tags(args.tags)
+            .about(args.about)
+            .visibility(args.visibility);
         match self.store.ingest(request).await {
             Ok(r) if r.created => format!("saved as {}", r.id),
             Ok(r) => format!("already remembered as {}", r.id),
@@ -150,6 +184,47 @@ impl Tool for MemoryForget {
             Ok(true) => format!("forgot {}", args.id),
             Ok(false) => format!("no memory with id {}", args.id),
             Err(e) => format!("memory forget failed: {e}"),
+        }
+    }
+}
+
+struct MemoryShare(MemoryStore);
+
+#[derive(Deserialize)]
+struct ShareArgs {
+    id: String,
+    visibility: Visibility,
+}
+
+#[async_trait::async_trait]
+impl Tool for MemoryShare {
+    fn name(&self) -> &str {
+        "memory_share"
+    }
+
+    fn definition(&self) -> Function {
+        Function {
+            name: "memory_share".to_owned(),
+            description: "Change who a memory may be told to, e.g. after the person it is about \
+                          says it is fine to share."
+                .to_owned(),
+            parameters: vec![
+                Parameter::required("id", "Memory id", ParameterType::String),
+                Parameter::required("visibility", "private, shared or public", ParameterType::String),
+            ],
+            strict: false,
+        }
+    }
+
+    async fn call(&self, arguments: &str) -> String {
+        let args: ShareArgs = match serde_json::from_str(arguments) {
+            Ok(a) => a,
+            Err(e) => return format!("invalid arguments for memory_share: {e}"),
+        };
+        match self.0.set_visibility(&args.id, args.visibility).await {
+            Ok(true) => format!("{} is now {}", args.id, visibility_label(args.visibility)),
+            Ok(false) => format!("no memory with id {}", args.id),
+            Err(e) => format!("memory share failed: {e}"),
         }
     }
 }

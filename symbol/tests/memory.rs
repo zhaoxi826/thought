@@ -261,3 +261,31 @@ async fn surrealkv_persists_across_reopen() {
     drop(store);
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[tokio::test]
+async fn about_and_visibility_roundtrip_through_tools() {
+    let store = MemoryStore::open(config(), None, None).await.unwrap();
+    filler(&store).await;
+    let mut registry = plugin::Registry::new();
+    symbol::register_memory_tools(&mut registry, store.clone(), "mind");
+
+    let saved = registry
+        .call("memory_save", r#"{"content":"小王下个月要换工作","about":["user:wang"]}"#)
+        .await
+        .unwrap();
+    let id = saved.trim_start_matches("saved as ").to_owned();
+    let mem = store.get(&id).await.unwrap().unwrap();
+    assert_eq!(mem.about, vec!["user:wang".to_string()]);
+    assert_eq!(mem.visibility, symbol::Visibility::Private);
+
+    let found = registry.call("memory_search", r#"{"query":"换工作"}"#).await.unwrap();
+    assert!(found.contains("private about user:wang"), "{found}");
+
+    let shared = registry
+        .call("memory_share", &format!(r#"{{"id":"{id}","visibility":"shared"}}"#))
+        .await
+        .unwrap();
+    assert_eq!(shared, format!("{id} is now shared"));
+    assert_eq!(store.get(&id).await.unwrap().unwrap().visibility, symbol::Visibility::Shared);
+    assert!(registry.call("memory_share", r#"{"id":"nope","visibility":"public"}"#).await.unwrap().starts_with("no memory"));
+}

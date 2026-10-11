@@ -20,6 +20,7 @@ DEFINE INDEX IF NOT EXISTS paragraph_vec ON paragraph FIELDS embedding HNSW DIME
 DEFINE INDEX IF NOT EXISTS paragraph_external ON paragraph FIELDS external_id;
 DEFINE INDEX IF NOT EXISTS paragraph_source ON paragraph FIELDS source;
 DEFINE INDEX IF NOT EXISTS paragraph_pending ON paragraph FIELDS extracted;
+DEFINE INDEX IF NOT EXISTS paragraph_about ON paragraph FIELDS about;
 
 DEFINE TABLE IF NOT EXISTS entity SCHEMALESS;
 
@@ -49,6 +50,27 @@ pub struct IngestRequest {
     /// 是否排队做三元组抽取（需要配置抽取器）。
     #[serde(default = "default_true")]
     pub extract: bool,
+
+    /// 这条记忆关于谁 / 从谁那里听来（如 `user:<id>`）。空 = 不涉及具体的人。
+    #[serde(default)]
+    pub about: Vec<String>,
+
+    /// 可见性；默认 `private`。
+    #[serde(default)]
+    pub visibility: Visibility,
+}
+
+/// 记忆的可见性：她据此判断能不能对别人说（不是硬拦截，见 docs/mind-design.md §4）。
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum Visibility {
+    /// 默认：涉及的人的私事，不主动转述。
+    #[default]
+    Private,
+    /// 当事人同意可以告诉别人。
+    Shared,
+    /// 常识，或她自己的东西。
+    Public,
 }
 
 fn default_true() -> bool {
@@ -78,6 +100,16 @@ impl IngestRequest {
         self.tags = tags;
         self
     }
+
+    pub fn about(mut self, about: Vec<String>) -> Self {
+        self.about = about;
+        self
+    }
+
+    pub fn visibility(mut self, visibility: Visibility) -> Self {
+        self.visibility = visibility;
+        self
+    }
 }
 
 /// 写入结果。
@@ -98,6 +130,10 @@ pub struct MemoryHit {
     pub source: String,
     pub tags: Vec<String>,
     pub created_at_ms: i64,
+    #[serde(default)]
+    pub about: Vec<String>,
+    #[serde(default)]
+    pub visibility: Visibility,
 
     /// 融合后的分数（0–1）。
     pub score: f64,
@@ -124,6 +160,10 @@ pub struct Memory {
     pub source: String,
     pub tags: Vec<String>,
     pub created_at_ms: i64,
+    #[serde(default)]
+    pub about: Vec<String>,
+    #[serde(default)]
+    pub visibility: Visibility,
 }
 
 impl From<ParagraphRow> for Memory {
@@ -134,6 +174,8 @@ impl From<ParagraphRow> for Memory {
             source: r.source,
             tags: r.tags,
             created_at_ms: r.created_at_ms,
+            about: r.about,
+            visibility: r.visibility,
         }
     }
 }
@@ -159,6 +201,10 @@ pub(crate) struct ParagraphRow {
     pub tags: Vec<String>,
     #[serde(default)]
     pub created_at_ms: i64,
+    #[serde(default)]
+    pub about: Vec<String>,
+    #[serde(default)]
+    pub visibility: Visibility,
 }
 
 /// 存储里的关系行。
