@@ -130,6 +130,13 @@ impl MindDb {
         }
     }
 
+    /// 待办已投递：删除（先投递后删，投递失败下次还会再取到）。
+    pub async fn finish_scheduled(&self, id: &str) {
+        if let Err(e) = self.exec("DELETE scheduled WHERE id = $id", json!({ "id": id })).await {
+            tracing::warn!("delete scheduled failed: {e}");
+        }
+    }
+
     pub async fn record_audit(&self, entry: Json) {
         if let Err(e) = self.exec("CREATE audit CONTENT $data", json!({ "data": entry })).await {
             tracing::warn!("audit write failed: {e}");
@@ -140,7 +147,7 @@ impl MindDb {
 #[async_trait]
 impl StreamStore for MindDb {
     async fn append(&self, at_ms: i64, body: MomentBody) -> PortResult<Moment> {
-        // seq 分配与写入在同一把锁内，保证单调且无空洞
+        // seq 先分配后写入：单调、重启后从 max+1 继续，不会重复；写失败会留下空洞（无害）
         let seq = {
             let mut next = self.next_seq.lock().expect("seq lock poisoned");
             let seq = *next;
@@ -234,14 +241,10 @@ impl SelfStore for MindDb {
     }
 
     async fn take_due(&self, now_ms: i64) -> PortResult<Vec<Scheduled>> {
-        let rows: Vec<Scheduled> = self
-            .query(
-                "LET $due = SELECT * OMIT id FROM scheduled WHERE due_ms <= $now ORDER BY due_ms;
-                 DELETE scheduled WHERE due_ms <= $now;
-                 RETURN $due;",
-                json!({ "now": now_ms }),
-            )
-            .await?;
-        Ok(rows)
+        self.query(
+            "SELECT * OMIT id FROM scheduled WHERE due_ms <= $now ORDER BY due_ms",
+            json!({ "now": now_ms }),
+        )
+        .await
     }
 }

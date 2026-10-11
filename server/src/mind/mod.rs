@@ -213,7 +213,10 @@ pub async fn start(
             match mind::SelfStore::take_due(&*selves, now).await {
                 Ok(due) => {
                     for item in due {
-                        let _ = m.perceive(Percept::Due { text: item.text }).await;
+                        let id = item.id.clone();
+                        if m.perceive(Percept::Due { text: item.text }).await.is_ok() {
+                            selves.finish_scheduled(&id).await;
+                        }
                     }
                 }
                 Err(e) => tracing::warn!("scheduled check failed: {e}"),

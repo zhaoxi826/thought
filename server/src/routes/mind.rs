@@ -75,6 +75,9 @@ pub(super) async fn say(
     if text.chars().count() > MAX_TEXT_CHARS {
         return Err(ApiError::bad_request("message too long"));
     }
+    if let Err(secs) = state.inner.say_throttle.hit(&user.sub) {
+        return Err(ApiError::new(StatusCode::TOO_MANY_REQUESTS, format!("slow down; try again in {secs}s")));
+    }
     let handle = state.mind()?;
     let moment = handle
         .mind

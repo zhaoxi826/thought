@@ -43,9 +43,51 @@ impl RateLimiter {
     }
 }
 
+/// 滑动窗口限频：每个键在 `window` 内最多 `max` 次。
+pub struct Throttle {
+    max: usize,
+    window: Duration,
+    hits: Mutex<HashMap<String, std::collections::VecDeque<Instant>>>,
+}
+
+impl Throttle {
+    pub fn new(max: usize, window: Duration) -> Self {
+        Self { max, window, hits: Mutex::new(HashMap::new()) }
+    }
+
+    /// 记一次；超过频率时返回需要等待的秒数。
+    pub fn hit(&self, key: &str) -> Result<(), u64> {
+        let now = Instant::now();
+        let mut hits = self.hits.lock().expect("throttle poisoned");
+        // 顺带清掉早已过期的键，防止 map 无限增长
+        if hits.len() > 1024 {
+            hits.retain(|_, q| q.back().is_some_and(|t| now.duration_since(*t) < self.window));
+        }
+        let q = hits.entry(key.to_owned()).or_default();
+        while q.front().is_some_and(|t| now.duration_since(*t) >= self.window) {
+            q.pop_front();
+        }
+        if q.len() >= self.max {
+            let wait = self.window.saturating_sub(now.duration_since(*q.front().expect("non-empty")));
+            return Err(wait.as_secs().max(1));
+        }
+        q.push_back(now);
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn throttle_limits_per_key() {
+        let t = Throttle::new(2, Duration::from_secs(60));
+        assert!(t.hit("a").is_ok());
+        assert!(t.hit("a").is_ok());
+        assert!(t.hit("a").is_err());
+        assert!(t.hit("b").is_ok());
+    }
 
     #[test]
     fn locks_after_max_failures_and_success_resets() {

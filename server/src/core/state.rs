@@ -5,7 +5,7 @@ use crate::core::auth::Jwt;
 use crate::core::db::Db;
 use crate::core::error::ApiError;
 use crate::core::budget::Budget;
-use crate::core::ratelimit::RateLimiter;
+use crate::core::ratelimit::{RateLimiter, Throttle};
 use crate::core::tasks::TaskRegistry;
 use agent::{AgentSystem, HistorySink, SessionHandle, SessionOptions};
 use model::Message;
@@ -15,6 +15,9 @@ use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 use symbol::MemoryStore;
 use tokio::sync::Mutex;
+
+/// 每人每分钟最多对她说几句话（防刷，也防一个人把她的注意力和 token 全占了）。
+pub const SAY_PER_MINUTE: usize = 20;
 
 /// axum 共享状态。`Clone` 廉价。
 #[derive(Clone)]
@@ -29,6 +32,8 @@ pub(crate) struct Inner {
     pub budget: Budget,
     /// 登录 / 二次鉴权失败限流。
     pub login_limiter: RateLimiter,
+    /// 和她说话的频率限制（每人每分钟）。
+    pub say_throttle: Throttle,
     /// agent 系统（可热替换：配置写回后新会话使用新系统，进行中的会话不受影响）。
     pub agents: RwLock<AgentSystem>,
     /// 构造 agent 系统用的真实工具池（热替换时复用）。
@@ -94,6 +99,7 @@ impl AppState {
                 tasks,
                 budget,
                 login_limiter: RateLimiter::new(5, std::time::Duration::from_secs(15 * 60)),
+                say_throttle: Throttle::new(SAY_PER_MINUTE, std::time::Duration::from_secs(60)),
                 agents: RwLock::new(agents),
                 tools,
                 config: RwLock::new(config.clone()),
