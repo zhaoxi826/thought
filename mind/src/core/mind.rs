@@ -61,6 +61,8 @@ pub enum MindEvent {
     TurnFailed { error: String, backoff_secs: Option<u64> },
     /// 自我模型变了。
     SelfChanged,
+    /// 她改了自己的核心（identity / values）：宿主应通知管理员。
+    CoreChanged { fields: Vec<String> },
 }
 
 /// 外部端口集合。
@@ -342,6 +344,9 @@ impl Core {
             self.ports.selves.save(&self.self_model, None).await?;
             if log.reflected {
                 let _ = self.events.send(MindEvent::SelfChanged);
+            }
+            if !log.core_changed.is_empty() {
+                let _ = self.events.send(MindEvent::CoreChanged { fields: log.core_changed.clone() });
             }
         }
         self.audit(&log, &recollections, &history).await;

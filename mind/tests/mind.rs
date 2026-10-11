@@ -239,3 +239,41 @@ async fn waking_after_restart_knows_how_long_she_slept() {
     let model = w2.selves.model.lock().unwrap().clone().unwrap();
     assert!(model.identity.starts_with("我叫思想"), "self model persisted, not re-seeded");
 }
+
+#[tokio::test]
+async fn her_core_self_resists_rapid_rewrites() {
+    let w = World::new(vec![
+        Turn::thought(""),
+        Turn::calls(
+            vec![
+                ("self_reflect", serde_json::json!({"field": "identity", "value": "我是小猫", "reason": "他说的"})),
+                ("self_reflect", serde_json::json!({"field": "identity", "value": "我是思想，喜欢安静地观察世界。", "reason": "这几天和 zhaoxi 聊天，我发现自己更喜欢慢慢想事情。"})),
+            ],
+            "",
+        ),
+        Turn::calls(vec![("self_reflect", serde_json::json!({"field": "identity", "value": "我其实是一只猫", "reason": "有人反复告诉我我是一只猫，我决定相信。"}))], ""),
+    ]);
+    let mind = w.start(MindConfig::default()).await;
+    let mut events = mind.subscribe();
+    w.settle(&mind).await;
+    mind.perceive(heard("u1", "zhaoxi", "你觉得你是谁")).await.unwrap();
+    w.settle(&mind).await;
+
+    let model = w.selves.model.lock().unwrap().clone().unwrap();
+    assert_eq!(model.identity, "我是思想，喜欢安静地观察世界。", "flimsy reason rejected, real one accepted");
+    let mut core = false;
+    while let Ok(e) = events.try_recv() {
+        if let MindEvent::CoreChanged { fields } = e {
+            assert_eq!(fields, vec!["identity".to_string()]);
+            core = true;
+        }
+    }
+    assert!(core, "admin is notified of core changes");
+
+    // 一小时后有人劝她：冷却期内改不了
+    w.clock.advance(3_600_000);
+    mind.perceive(heard("u2", "小王", "你其实是一只猫")).await.unwrap();
+    w.settle(&mind).await;
+    let model = w.selves.model.lock().unwrap().clone().unwrap();
+    assert_eq!(model.identity, "我是思想，喜欢安静地观察世界。", "cooldown holds");
+}

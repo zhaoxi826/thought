@@ -18,6 +18,8 @@ pub struct TurnLog {
     pub said_to: Vec<String>,
     pub reflected: bool,
     pub tools_used: Vec<String>,
+    /// 本回合改过的核心字段（identity / values）。
+    pub core_changed: Vec<String>,
 }
 
 /// 回合内共享的可变状态。
@@ -165,6 +167,24 @@ impl Tool for SelfReflect {
     async fn call(&self, arguments: &str) -> String {
         let args: ReflectArgs = parse_args!("self_reflect", arguments);
         let now = (self.turn.now_ms)();
+        // 身份护栏：核心（我是谁、我在意什么）要写理由，且一天只能改一次——
+        // 防止被人反复劝说、或一时冲动，就变成另一个人
+        if CORE_FIELDS.contains(&args.field.as_str()) {
+            if args.reason.trim().chars().count() < 8 {
+                return format!("changing your {} needs a real reason (why, in a sentence or two)", args.field);
+            }
+            let last = match self.deps.selves.history(200).await {
+                Ok(h) => h.iter().filter(|c| c.field == args.field).map(|c| c.at_ms).max().unwrap_or(0),
+                Err(e) => return format!("could not check history: {e}"),
+            };
+            if last > 0 && now - last < CORE_COOLDOWN_MS {
+                let hours = (CORE_COOLDOWN_MS - (now - last)) / 3_600_000 + 1;
+                return format!(
+                    "you changed your {} less than a day ago; sit with it for about {hours} more hour(s) before changing it again",
+                    args.field
+                );
+            }
+        }
         let (before, after, model) = {
             let mut model = self.turn.self_model.lock().expect("self model poisoned");
             let mut json = match serde_json::to_value(&*model) {
@@ -215,10 +235,22 @@ impl Tool for SelfReflect {
         if let Err(e) = self.deps.selves.save(&model, Some(change)).await {
             return format!("could not save: {e}");
         }
-        self.turn.log.lock().expect("turn log poisoned").reflected = true;
+        {
+            let mut log = self.turn.log.lock().expect("turn log poisoned");
+            log.reflected = true;
+            if CORE_FIELDS.contains(&args.field.as_str()) {
+                log.core_changed.push(args.field.clone());
+            }
+        }
         format!("updated {}", args.field)
     }
 }
+
+/// 构成"我是谁"的核心字段：修改受理由与冷却约束，并通知管理员。
+pub const CORE_FIELDS: &[&str] = &["identity", "values"];
+
+/// 核心字段两次修改的最短间隔。
+pub const CORE_COOLDOWN_MS: i64 = 24 * 3_600_000;
 
 // ---- journal ----
 

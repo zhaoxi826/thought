@@ -200,6 +200,28 @@ pub async fn start(
         }
     });
 
+    // 核心自我变化：写审计（管理员在审计页 / 内心页能看到）
+    {
+        let (mut rx, db) = (mind.subscribe(), db.clone());
+        tokio::spawn(async move {
+            loop {
+                match rx.recv().await {
+                    Ok(mind::MindEvent::CoreChanged { fields }) => {
+                        tracing::warn!(?fields, "she changed her core self");
+                        db.record_audit(serde_json::json!({
+                            "at_ms": mind::Clock::now_ms(&SystemClock),
+                            "kind": "core_changed",
+                            "fields": fields,
+                        }))
+                        .await;
+                    }
+                    Ok(_) | Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}
+                    Err(_) => return,
+                }
+            }
+        });
+    }
+
     // 心跳：从持久化恢复各驱动上次被满足的时间，定期写回
     let satisfied = db.drive_memory().await;
     let heart = Heart::start(
