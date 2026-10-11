@@ -118,7 +118,7 @@ headless = true
 width = 1280
 height = 800
 args = []                        # 以 root 或在容器里运行时需要 ["--no-sandbox"]
-# connect = "http://127.0.0.1:9222"
+# connect = "http://127.0.0.1:9333"   # 连接一个已在运行的 Chromium（需带 --remote-debugging-port）
 
 # ---- agent ----
 
