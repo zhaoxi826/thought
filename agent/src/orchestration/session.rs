@@ -282,6 +282,11 @@ impl SessionHandle {
         self.events.subscribe()
     }
 
+    /// 当前事件订阅者数（例如打开着的前端连接）。
+    pub fn subscriber_count(&self) -> usize {
+        self.events.receiver_count()
+    }
+
     /// 正在运行的任务。
     pub fn tasks(&self) -> Vec<TaskInfo> {
         self.shared.tasks()

@@ -58,7 +58,12 @@ pub(crate) struct Inner {
 pub(crate) struct LiveSession {
     pub owner: String,
     pub handle: SessionHandle,
+    /// 最近一次被访问（发消息 / 订阅事件 / 查任务）。
+    pub last_used: std::time::Instant,
 }
+
+/// 旧的每会话主控：空闲多久后卸载（下次访问再从持久化恢复）。
+pub const SESSION_IDLE: std::time::Duration = std::time::Duration::from_secs(30 * 60);
 
 /// 把主控历史写回 `chat_session` 表。
 struct DbSink(Db);
@@ -160,10 +165,22 @@ impl AppState {
     /// 取（或从持久化恢复）会话的运行句柄，校验归属。
     pub(crate) async fn session(&self, owner: &str, id: &str) -> Result<SessionHandle, ApiError> {
         let mut sessions = self.inner.sessions.lock().await;
-        if let Some(live) = sessions.get(id) {
+        // 顺带卸载空闲的会话（还有任务在跑、或有人订阅着事件的不卸载）
+        sessions.retain(|sid, live| {
+            let keep = sid == id
+                || live.last_used.elapsed() < SESSION_IDLE
+                || !live.handle.tasks().is_empty()
+                || live.handle.subscriber_count() > 0;
+            if !keep {
+                tracing::debug!(session = %sid, "unloading idle session");
+            }
+            keep
+        });
+        if let Some(live) = sessions.get_mut(id) {
             if live.owner != owner {
                 return Err(ApiError::not_found("session not found"));
             }
+            live.last_used = std::time::Instant::now();
             return Ok(live.handle.clone());
         }
 
@@ -193,6 +210,7 @@ impl AppState {
             LiveSession {
                 owner: owner.to_owned(),
                 handle: handle.clone(),
+                last_used: std::time::Instant::now(),
             },
         );
         Ok(handle)

@@ -138,4 +138,8 @@ impl EventSender {
     pub fn subscribe(&self) -> tokio::sync::broadcast::Receiver<AgentEvent> {
         self.broadcast.subscribe()
     }
+
+    pub fn receiver_count(&self) -> usize {
+        self.broadcast.receiver_count()
+    }
 }
