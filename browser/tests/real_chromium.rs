@@ -141,6 +141,13 @@ async fn she_can_drive_a_real_chromium() {
     let r = call(&tools, "browser_cdp", serde_json::json!({ "method": "Page.printToPDF", "params": {} })).await;
     assert!(r.contains("\"data\""), "pdf via raw cdp: {}", &r[..r.len().min(80)]);
 
+    // 页面自己关掉当前标签：下一次操作自动换到别的标签，不会一直报 session 失效
+    call(&tools, "browser_tab_new", serde_json::json!({ "url": format!("{site}/second") })).await;
+    let _ = call(&tools, "browser_eval", serde_json::json!({ "script": "setTimeout(() => window.close(), 50); 1" })).await;
+    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    let r = call(&tools, "browser_snapshot", serde_json::json!({})).await;
+    assert!(!r.contains("failed"), "recovered from closed tab: {r}");
+
     // 错误是可读的，不是 panic
     let r = call(&tools, "browser_click", serde_json::json!({ "ref": 9999 })).await;
     assert!(r.contains("element not found"), "{r}");

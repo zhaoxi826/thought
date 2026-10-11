@@ -150,25 +150,45 @@ impl Browser {
             .collect())
     }
 
-    /// 当前标签页的 session。新开的标签页（如 target=_blank）会被自动接管。
+    /// 当前标签页的 session。顺带同步标签页：接管页面自己弹出的新标签，
+    /// 移除已经关闭 / 崩溃的标签（当前标签没了就换到另一个，一个都没有就新开一个）。
     pub async fn session(&self) -> CdpResult<String> {
-        self.adopt_new_tabs().await;
-        let st = self.state.lock().await;
-        let active = st.active.as_ref().ok_or_else(|| err("no open tab"))?;
-        st.tabs.get(active).cloned().ok_or_else(|| err("active tab vanished"))
+        self.sync_tabs().await;
+        {
+            let st = self.state.lock().await;
+            if let Some(active) = &st.active
+                && let Some(session) = st.tabs.get(active)
+            {
+                return Ok(session.clone());
+            }
+        }
+        // 一个标签都不剩：开一个空白页（不经 new_tab，避免 navigate → session 递归）
+        let r = self.cdp.call(None, "Target.createTarget", json!({ "url": "about:blank" })).await?;
+        let id = r["targetId"].as_str().ok_or_else(|| err("createTarget: no targetId"))?.to_owned();
+        let session = self.attach(&id).await?;
+        self.state.lock().await.active = Some(id);
+        Ok(session)
     }
 
-    /// 接管页面自己弹出的新标签页（不切换当前）。
-    async fn adopt_new_tabs(&self) {
+    async fn sync_tabs(&self) {
         let Ok(targets) = self.cdp.call(None, "Target.getTargets", json!({})).await else { return };
-        let known: Vec<String> = self.state.lock().await.tabs.keys().cloned().collect();
-        for t in targets["targetInfos"].as_array().into_iter().flatten() {
-            if t["type"] == "page"
-                && let Some(id) = t["targetId"].as_str()
-                && !known.iter().any(|k| k == id)
-            {
-                let _ = self.attach(id).await;
+        let live: Vec<String> = targets["targetInfos"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter(|t| t["type"] == "page")
+            .filter_map(|t| t["targetId"].as_str().map(str::to_owned))
+            .collect();
+        let known: Vec<String> = {
+            let mut st = self.state.lock().await;
+            st.tabs.retain(|id, _| live.contains(id));
+            if st.active.as_ref().is_some_and(|a| !st.tabs.contains_key(a)) {
+                st.active = st.tabs.keys().next().cloned();
             }
+            st.tabs.keys().cloned().collect()
+        };
+        for id in live.iter().filter(|id| !known.contains(id)) {
+            let _ = self.attach(id).await;
         }
     }
 

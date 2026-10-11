@@ -37,6 +37,12 @@ type Pending = Arc<Mutex<HashMap<u64, oneshot::Sender<CdpResult<Value>>>>>;
 /// 到浏览器的一条 CDP 连接。`Clone` 廉价；连接断开后所有命令返回错误。
 #[derive(Clone)]
 pub struct Cdp {
+    inner: Arc<std::sync::RwLock<Conn>>,
+}
+
+/// 一条具体的连接；浏览器重启后整体替换。
+#[derive(Clone)]
+struct Conn {
     tx: mpsc::UnboundedSender<String>,
     pending: Pending,
     next_id: Arc<AtomicU64>,
@@ -48,6 +54,43 @@ pub struct Cdp {
 impl Cdp {
     /// 连接 `ws://…/devtools/browser/…`。`timeout` 是单条命令的默认超时。
     pub async fn connect(ws_url: &str, timeout: Duration) -> CdpResult<Self> {
+        Ok(Self { inner: Arc::new(std::sync::RwLock::new(Conn::connect(ws_url, timeout).await?)) })
+    }
+
+    /// 换成一条新连接（浏览器重启后）。旧连接的订阅者会收到 Closed。
+    pub async fn reconnect(&self, ws_url: &str) -> CdpResult<()> {
+        let timeout = self.conn().timeout;
+        let conn = Conn::connect(ws_url, timeout).await?;
+        *self.inner.write().expect("cdp poisoned") = conn;
+        Ok(())
+    }
+
+    fn conn(&self) -> Conn {
+        self.inner.read().expect("cdp poisoned").clone()
+    }
+
+    pub fn is_alive(&self) -> bool {
+        self.conn().alive.load(Ordering::Relaxed)
+    }
+
+    pub fn subscribe(&self) -> broadcast::Receiver<CdpEvent> {
+        self.conn().events.subscribe()
+    }
+
+    /// 发一条命令。`session` 为 `None` 时发给浏览器本身。
+    pub async fn call(&self, session: Option<&str>, method: &str, params: Value) -> CdpResult<Value> {
+        let conn = self.conn();
+        let timeout = conn.timeout;
+        conn.call_timeout(session, method, params, timeout).await
+    }
+
+    pub async fn call_timeout(&self, session: Option<&str>, method: &str, params: Value, timeout: Duration) -> CdpResult<Value> {
+        self.conn().call_timeout(session, method, params, timeout).await
+    }
+}
+
+impl Conn {
+    async fn connect(ws_url: &str, timeout: Duration) -> CdpResult<Self> {
         let (ws, _) = tokio_tungstenite::connect_async(ws_url)
             .await
             .map_err(|e| CdpError(format!("connect {ws_url}: {e}")))?;
@@ -100,21 +143,8 @@ impl Cdp {
         Ok(Self { tx, pending, next_id: Arc::new(AtomicU64::new(1)), events, alive, timeout })
     }
 
-    pub fn is_alive(&self) -> bool {
-        self.alive.load(Ordering::Relaxed)
-    }
-
-    pub fn subscribe(&self) -> broadcast::Receiver<CdpEvent> {
-        self.events.subscribe()
-    }
-
-    /// 发一条命令。`session` 为 `None` 时发给浏览器本身。
-    pub async fn call(&self, session: Option<&str>, method: &str, params: Value) -> CdpResult<Value> {
-        self.call_timeout(session, method, params, self.timeout).await
-    }
-
-    pub async fn call_timeout(&self, session: Option<&str>, method: &str, params: Value, timeout: Duration) -> CdpResult<Value> {
-        if !self.is_alive() {
+    async fn call_timeout(&self, session: Option<&str>, method: &str, params: Value, timeout: Duration) -> CdpResult<Value> {
+        if !self.alive.load(Ordering::Relaxed) {
             return Err(CdpError("browser connection closed".into()));
         }
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
