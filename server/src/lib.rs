@@ -126,7 +126,10 @@ async fn build_inner(
         }
     };
 
-    let state = AppState::new(config, config_path, db, tasks, agents, tools, memory, jwt);
+    let budget = core::budget::Budget::new(&conn, &config.storage.namespace, &config.storage.database, config.budget.clone())
+        .await
+        .map_err(|e| fail("storage", e))?;
+    let state = AppState::new(config, config_path, db, tasks, budget, agents, tools, memory, jwt);
     Ok(Built {
         router: routes::router(state.clone()),
         state,

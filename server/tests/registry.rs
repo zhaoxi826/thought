@@ -292,3 +292,55 @@ async fn config_read_write_with_etag_and_secrets_preserved() {
     let no_match = app.http.put(format!("{}/api/config", app.base)).bearer_auth(&token).json(&config).send().await.unwrap();
     assert_eq!(no_match.status(), 428);
 }
+
+#[tokio::test]
+async fn budget_meters_usage_and_pause_persists() {
+    let llm = MockLlm::start(vec![("ctrl", vec![text_reply("hi")])]).await;
+    let app = App::start(&llm.url, "budget").await;
+    let token = app.login().await;
+
+    let (_, session) = app.call("POST", "/api/sessions", &token, Some(json!({}))).await;
+    let sid = session["id"].as_str().unwrap().to_owned();
+    let mut events = app
+        .http
+        .get(format!("{}/api/sessions/{sid}/events", app.base))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .unwrap();
+    app.call("POST", &format!("/api/sessions/{sid}/messages"), &token, Some(json!({"content": "hello"}))).await;
+    read_events(&mut events, "reply").await;
+
+    let (status, budget) = app.call("GET", "/api/mind/budget", &token, None).await;
+    assert_eq!(status, 200, "{budget}");
+    assert_eq!(budget["by_origin"]["user"]["total_tokens"], 2, "{budget}");
+    assert_eq!(budget["by_origin"]["user"]["calls"], 1);
+    assert_eq!(budget["mind_tokens_today"], 0, "user chats don't count against her autonomy budget");
+    assert_eq!(budget["paused"], false);
+
+    assert_eq!(app.call("POST", "/api/mind/pause", &token, None).await.0, 204);
+    assert_eq!(app.call("GET", "/api/mind/budget", &token, None).await.1["paused"], true);
+    assert_eq!(app.call("POST", "/api/mind/resume", &token, None).await.0, 204);
+    assert_eq!(app.call("GET", "/api/mind/budget", &token, None).await.1["paused"], false);
+
+    let (status, history) = app.call("GET", "/api/mind/budget/history?days=3", &token, None).await;
+    assert_eq!(status, 200);
+    assert_eq!(history[0]["origin"], "user", "{history}");
+}
+
+#[tokio::test]
+async fn login_is_rate_limited_per_username() {
+    let llm = MockLlm::start(vec![]).await;
+    let app = App::start(&llm.url, "ratelimit").await;
+    let bad = |pw: &str| {
+        app.http
+            .post(format!("{}/api/auth/login", app.base))
+            .json(&json!({"username": "admin", "password": pw}))
+            .send()
+    };
+    for _ in 0..5 {
+        assert_eq!(bad("wrong").await.unwrap().status(), 401);
+    }
+    // 锁定后连正确密码也不行
+    assert_eq!(bad(ADMIN_PASSWORD).await.unwrap().status(), 429);
+}

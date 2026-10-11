@@ -8,7 +8,7 @@ pub mod core;
 pub mod orchestration;
 
 pub use core::config::{AgentConfig, ControllerSpec, Limits, WorkerSpec};
-pub use core::event::{AgentEvent, EventObserver, EventSender, UsageView};
+pub use core::event::{AgentEvent, EventObserver, EventSender, Observers, UsageView};
 pub use core::runner::Runner;
 pub use orchestration::session::{
     AgentSystem, HistorySink, Input, SessionHandle, SessionOptions, TaskInfo, NO_REPLY,

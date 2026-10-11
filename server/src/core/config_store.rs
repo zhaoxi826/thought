@@ -112,6 +112,9 @@ fn classify(new: &ServerConfig, old: &ServerConfig) -> (Vec<&'static str>, Vec<&
     if changed(&new.agent.limits, &old.agent.limits) {
         hot.push("agent.limits");
     }
+    if changed(&new.budget, &old.budget) {
+        hot.push("budget");
+    }
     (restart, hot)
 }
 
@@ -176,6 +179,7 @@ pub fn apply(state: &AppState, if_match: Option<&str>, body: Json) -> Result<App
     // 热生效：新会话使用新 agent 系统；memory 的可热字段立即生效
     *state.inner.agents.write().expect("agents lock poisoned") = agents;
     *state.inner.memory_cfg.write().expect("memory cfg lock poisoned") = new.memory.clone();
+    state.inner.budget.set_config(new.budget.clone());
     *current = new;
 
     Ok(ApplyResult {

@@ -4,6 +4,8 @@ use crate::config::{MemorySection, ServerConfig};
 use crate::core::auth::Jwt;
 use crate::core::db::Db;
 use crate::core::error::ApiError;
+use crate::core::budget::Budget;
+use crate::core::ratelimit::RateLimiter;
 use crate::core::tasks::TaskRegistry;
 use agent::{AgentSystem, HistorySink, SessionHandle, SessionOptions};
 use model::Message;
@@ -24,6 +26,9 @@ pub struct AppState {
 pub(crate) struct Inner {
     pub db: Db,
     pub tasks: TaskRegistry,
+    pub budget: Budget,
+    /// 登录 / 二次鉴权失败限流。
+    pub login_limiter: RateLimiter,
     /// agent 系统（可热替换：配置写回后新会话使用新系统，进行中的会话不受影响）。
     pub agents: RwLock<AgentSystem>,
     /// 构造 agent 系统用的真实工具池（热替换时复用）。
@@ -71,6 +76,7 @@ impl AppState {
         config_path: Option<PathBuf>,
         db: Db,
         tasks: TaskRegistry,
+        budget: Budget,
         agents: AgentSystem,
         tools: Registry,
         memory: Option<MemoryStore>,
@@ -80,6 +86,8 @@ impl AppState {
             inner: Arc::new(Inner {
                 db,
                 tasks,
+                budget,
+                login_limiter: RateLimiter::new(5, std::time::Duration::from_secs(15 * 60)),
                 agents: RwLock::new(agents),
                 tools,
                 config: RwLock::new(config.clone()),
@@ -109,6 +117,10 @@ impl AppState {
 
     pub(crate) fn tasks(&self) -> &TaskRegistry {
         &self.inner.tasks
+    }
+
+    pub(crate) fn budget(&self) -> &Budget {
+        &self.inner.budget
     }
 
     pub(crate) fn db(&self) -> &Db {
@@ -151,7 +163,10 @@ impl AppState {
                 history,
                 tools,
                 sink: Some(Arc::new(DbSink(self.db().clone()))),
-                observer: Some(Arc::new(registry.clone())),
+                observer: Some(Arc::new(agent::Observers(vec![
+                    Arc::new(registry.clone()),
+                    Arc::new(self.budget().clone()),
+                ]))),
                 first_task_id,
             },
         );

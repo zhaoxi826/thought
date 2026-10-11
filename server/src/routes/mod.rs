@@ -9,6 +9,9 @@
 //! | GET | /api/models | 模型配置（admin，不含密钥） |
 //! | GET | /api/agents | 主控与 worker 定义（含 system、limits） |
 //! | GET/PUT | /api/config | 读取（ETag，脱敏）/ 写回配置（admin，If-Match） |
+//! | GET | /api/mind/budget | 今日用量（按来源）、软/硬上限、疲劳度、是否急停 |
+//! | GET | /api/mind/budget/history?days= | 按日用量历史（admin） |
+//! | POST | /api/mind/pause / resume | 急停 / 恢复自主活动（admin） |
 //! | GET | /api/tasks | 全局任务列表（含历史，游标分页） |
 //! | GET | /api/tasks/events | 全局任务事件流（SSE） |
 //! | GET | /api/tasks/{sid}/{tid} | 任务详情（含活动事件） |
@@ -25,6 +28,7 @@
 mod admin;
 mod auth;
 mod memory;
+mod mind;
 mod sessions;
 mod tasks;
 mod web;
@@ -46,6 +50,10 @@ pub fn router(state: AppState) -> Router {
         .route("/api/models", get(admin::list_models))
         .route("/api/agents", get(admin::list_agents))
         .route("/api/config", get(admin::get_config).put(admin::put_config))
+        .route("/api/mind/budget", get(mind::budget))
+        .route("/api/mind/budget/history", get(mind::budget_history))
+        .route("/api/mind/pause", post(mind::pause))
+        .route("/api/mind/resume", post(mind::resume))
         .route("/api/tasks", get(tasks::list_tasks))
         .route("/api/tasks/events", get(tasks::task_events))
         .route("/api/tasks/{session_id}/{task_id}", get(tasks::get_task))

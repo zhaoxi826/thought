@@ -35,6 +35,10 @@ pub struct ServerConfig {
     /// 文件与命令的沙箱边界。
     #[serde(default)]
     pub sandbox: sandbox::SandboxConfig,
+
+    /// token 预算（代谢）。
+    #[serde(default)]
+    pub budget: crate::core::budget::BudgetConfig,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]

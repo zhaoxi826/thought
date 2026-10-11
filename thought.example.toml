@@ -72,6 +72,12 @@ network = true
 command_timeout_secs = 120
 max_output_bytes = 262144
 
+# ---- 代谢：她自主活动的 token 预算 ----
+# 只约束她自己醒来做的事；人找她说话不受限。超过硬上限后当天不再自主醒来。
+[budget]
+daily_soft_tokens = 2000000      # 接近时她会更"困"、更少醒来
+daily_hard_tokens = 10000000     # 防失控；急停见 POST /api/mind/pause
+
 # ---- agent ----
 
 [agent.controller]

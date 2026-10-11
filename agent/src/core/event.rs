@@ -79,6 +79,17 @@ pub trait EventObserver: Send + Sync {
     fn observe(&self, session_id: &str, event: &AgentEvent);
 }
 
+/// 把多个观察者合成一个：按顺序逐个回调。
+pub struct Observers(pub Vec<std::sync::Arc<dyn EventObserver>>);
+
+impl EventObserver for Observers {
+    fn observe(&self, session_id: &str, event: &AgentEvent) {
+        for o in &self.0 {
+            o.observe(session_id, event);
+        }
+    }
+}
+
 /// 事件出口：broadcast 给实时订阅者（多个前端标签页，没有订阅者时静默丢弃），
 /// 同时同步交给可选的无损观察者。`Clone` 廉价。
 #[derive(Clone)]
