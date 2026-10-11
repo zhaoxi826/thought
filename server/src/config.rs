@@ -93,7 +93,8 @@ impl ServerConfig {
             } else {
                 path.to_path_buf()
             };
-            for ext in ["toml", "toml.bak", "toml.tmp"] {
+            // 配置及其备份 / 临时文件，以及同名的 .env（部署时放密钥）
+            for ext in ["toml", "toml.bak", "toml.tmp", "env"] {
                 sb.protected.push(path.with_extension(ext));
             }
         }
@@ -242,7 +243,7 @@ model = "m"
         config.resolve_paths(Path::new("/srv/thought"));
         let sb = config.effective_sandbox(Some(Path::new("/srv/thought/thought.toml")));
         assert_eq!(sb.workspace, Path::new("/srv/thought/data/mind/workspace"));
-        for p in ["/srv/thought/thought.toml", "/srv/thought/thought.toml.bak", "/srv/thought/data/thought"] {
+        for p in ["/srv/thought/thought.toml", "/srv/thought/thought.toml.bak", "/srv/thought/thought.env", "/srv/thought/data/thought"] {
             assert!(sb.protected.iter().any(|x| x == Path::new(p)), "{p} not protected: {:?}", sb.protected);
         }
     }

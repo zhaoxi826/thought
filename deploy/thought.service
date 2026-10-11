@@ -1,0 +1,43 @@
+# 思想 · systemd 单元
+#
+# 以专用用户 thought 运行（无 sudo / docker）。程序、前端、配置、数据都在
+# /home/thought/thought 下，与开发仓库 /data/thought 分离：开发用户的文件对她只读
+# （或不可见），她的数据只有她自己能写。
+#
+# 安装：sudo deploy/install.sh   （见 deploy/README.md）
+
+[Unit]
+Description=thought — 思想
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=thought
+Group=thought
+WorkingDirectory=/home/thought/thought
+ExecStart=/home/thought/thought/bin/thought /home/thought/thought/thought.toml
+EnvironmentFile=/home/thought/thought/thought.env
+Restart=on-failure
+RestartSec=5
+# 优雅退出（main 监听 Ctrl-C / SIGINT）
+KillSignal=SIGINT
+TimeoutStopSec=20
+
+# ---- 加固 ----
+# 保留非特权 user namespace：bwrap 需要它为每条命令建沙箱。
+# 不能用 RestrictSUIDSGID=：它的 seccomp 过滤会挡住 bwrap 的 mount 调用
+# （实测 "Can't open source /: Function not implemented"）；NoNewPrivileges 已让 SUID 失效。
+# 也不能用 ProtectKernelTunables=：/proc 被部分覆盖后 bwrap 无法挂载新的 proc。
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=tmpfs
+BindPaths=/home/thought/thought
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+LockPersonality=yes
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target
