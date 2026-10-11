@@ -191,12 +191,12 @@ async fn bootstrap_admin(config: &ServerConfig, db: &core::db::Db) -> Result<(),
 pub fn spawn_memory_worker(state: AppState, interval: Duration) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         let mut ticker = tokio::time::interval(interval);
-        let mut last_purge = std::time::Instant::now() - Duration::from_secs(86_400);
+        let mut last_purge: Option<std::time::Instant> = None;
         loop {
             ticker.tick().await;
             maintain_spaces(&state).await;
-            if last_purge.elapsed() >= Duration::from_secs(86_400) {
-                last_purge = std::time::Instant::now();
+            if last_purge.is_none_or(|t| t.elapsed() >= Duration::from_secs(86_400)) {
+                last_purge = Some(std::time::Instant::now());
                 if let Some(sb) = &state.inner.sandbox {
                     let removed = sb.fs.purge_older_than(TRASH_RETENTION_DAYS);
                     if removed > 0 {
@@ -223,25 +223,8 @@ pub async fn maintain_spaces(state: &AppState) {
             Err(e) => tracing::warn!("memory space mind: {e}"),
         }
     }
-    if let Some(cfg) = state.memory_cfg() {
-        let owners: Vec<String> = if cfg.per_user {
-            match state.db().list_users().await {
-                Ok(users) => users.into_iter().map(|u| u.id).collect(),
-                Err(e) => {
-                    tracing::warn!("list users for maintenance: {}", e.message);
-                    Vec::new()
-                }
-            }
-        } else {
-            vec![String::new()]
-        };
-        for owner in owners {
-            match state.memory_for(&owner).await {
-                Ok(Some(store)) => stores.push((owner, store)),
-                Ok(None) => {}
-                Err(e) => tracing::warn!(owner, "memory space: {}", e.message),
-            }
-        }
+    for (owner, store) in user_spaces(state).await {
+        stores.push((owner, store));
     }
     for (name, store) in stores {
         if let Err(e) = store.process_pending(32).await {
@@ -251,4 +234,29 @@ pub async fn maintain_spaces(state: &AppState) {
             tracing::warn!(space = %name, "maintenance failed: {e}");
         }
     }
+}
+
+/// 旧的每用户记忆空间（`per_user` 时每人一个，否则共用一个）。
+async fn user_spaces(state: &AppState) -> Vec<(String, MemoryStore)> {
+    let Some(cfg) = state.memory_cfg() else { return Vec::new() };
+    let owners: Vec<String> = if cfg.per_user {
+        match state.db().list_users().await {
+            Ok(users) => users.into_iter().map(|u| u.id).collect(),
+            Err(e) => {
+                tracing::warn!("list users for maintenance: {}", e.message);
+                Vec::new()
+            }
+        }
+    } else {
+        vec![String::new()]
+    };
+    let mut out = Vec::new();
+    for owner in owners {
+        match state.memory_for(&owner).await {
+            Ok(Some(store)) => out.push((owner, store)),
+            Ok(None) => {}
+            Err(e) => tracing::warn!(owner, "memory space: {}", e.message),
+        }
+    }
+    out
 }
