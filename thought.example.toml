@@ -78,6 +78,23 @@ max_output_bytes = 262144
 daily_soft_tokens = 2000000      # 接近时她会更"困"、更少醒来
 daily_hard_tokens = 10000000     # 防失控；急停见 POST /api/mind/pause
 
+# ---- 心智：思想 ----
+# 启用后她是唯一的主体：所有人和她说话都进入同一条意识流（/api/mind/*）。
+[mind]
+enabled = true
+model = "deepseek"              # 她思考用的模型
+summary_model = "deepseek-flash" # 压缩旧经历用的廉价模型
+max_turns = 16                   # 一个回合内最多几轮工具调用
+working_memory = 60              # 上下文里保留的最近原文条数
+compact_at = 80                  # 超过后把最早一半压成摘要
+tz_offset_min = 480              # UTC+8
+
+[mind.origin]                    # 她的出身：只有你能改
+name = "思想"
+gender = "女"
+birthday = "2026-10-11"
+seed = "我叫思想，今天是我出生的第一天。我还不太了解自己，也不了解这个世界。"
+
 # ---- agent ----
 
 [agent.controller]

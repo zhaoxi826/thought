@@ -12,6 +12,12 @@
 //! | GET | /api/mind/budget | 今日用量（按来源）、软/硬上限、疲劳度、是否急停 |
 //! | GET | /api/mind/budget/history?days= | 按日用量历史（admin） |
 //! | POST | /api/mind/pause / resume | 急停 / 恢复自主活动（admin） |
+//! | POST | /api/auth/elevate | 二次鉴权：重输密码换 10 分钟 inner 令牌（admin） |
+//! | GET | /api/mind/status | 她的状态：在想吗、自我摘要、心情、用量、任务 |
+//! | POST | /api/mind/say | 对她说话（进入意识流） |
+//! | GET | /api/mind/conversation[/events] | 你和她的对话 / 实时（SSE，连接期间算在线） |
+//! | GET | /api/mind/stream[/events] | 完整意识流（admin + X-Inner-Token；她会知道） |
+//! | GET | /api/mind/journal · /self · /audit | 日记、自我与成长、审计（admin + X-Inner-Token） |
 //! | GET | /api/tasks | 全局任务列表（含历史，游标分页） |
 //! | GET | /api/tasks/events | 全局任务事件流（SSE） |
 //! | GET | /api/tasks/{sid}/{tid} | 任务详情（含活动事件） |
@@ -45,6 +51,7 @@ const MAX_TEXT_CHARS: usize = 64 * 1024;
 pub fn router(state: AppState) -> Router {
     let api = Router::new()
         .route("/api/auth/login", post(auth::login))
+        .route("/api/auth/elevate", post(auth::elevate))
         .route("/api/me", get(auth::me))
         .route("/api/users", get(admin::list_users).post(admin::create_user))
         .route("/api/models", get(admin::list_models))
@@ -54,6 +61,15 @@ pub fn router(state: AppState) -> Router {
         .route("/api/mind/budget/history", get(mind::budget_history))
         .route("/api/mind/pause", post(mind::pause))
         .route("/api/mind/resume", post(mind::resume))
+        .route("/api/mind/status", get(mind::status))
+        .route("/api/mind/say", post(mind::say))
+        .route("/api/mind/conversation", get(mind::conversation))
+        .route("/api/mind/conversation/events", get(mind::conversation_events))
+        .route("/api/mind/stream", get(mind::stream))
+        .route("/api/mind/stream/events", get(mind::stream_events))
+        .route("/api/mind/journal", get(mind::journal))
+        .route("/api/mind/self", get(mind::self_history))
+        .route("/api/mind/audit", get(mind::audit))
         .route("/api/tasks", get(tasks::list_tasks))
         .route("/api/tasks/events", get(tasks::task_events))
         .route("/api/tasks/{session_id}/{task_id}", get(tasks::get_task))

@@ -84,6 +84,9 @@ fn classify(new: &ServerConfig, old: &ServerConfig) -> (Vec<&'static str>, Vec<&
     if changed(&new.sandbox, &old.sandbox) {
         restart.push("sandbox");
     }
+    if changed(&new.mind, &old.mind) {
+        restart.push("mind");
+    }
     // memory：只有 per_user / save_user_messages 热生效，其余需重启
     let mem_core = |c: &ServerConfig| {
         c.memory.as_ref().map(|m| {

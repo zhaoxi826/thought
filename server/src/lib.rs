@@ -5,6 +5,7 @@
 
 pub mod config;
 pub mod core;
+pub mod mind;
 pub mod routes;
 
 pub use config::ServerConfig;
@@ -129,7 +130,22 @@ async fn build_inner(
     let budget = core::budget::Budget::new(&conn, &config.storage.namespace, &config.storage.database, config.budget.clone())
         .await
         .map_err(|e| fail("storage", e))?;
-    let state = AppState::new(config, config_path, db, tasks, budget, agents, tools, memory, jwt);
+    let mind = match &config.mind {
+        Some(section) if section.enabled => {
+            // 心智只有一个记忆空间：固定为 mind
+            let memory = match &memory {
+                Some(root) => Some(root.scoped("mind").await.map_err(|e| fail("memory", e))?),
+                None => None,
+            };
+            Some(
+                mind::start(config, section, &conn, db.clone(), &agents, &tasks, &budget, memory, tools.clone())
+                    .await
+                    .map_err(BuildError)?,
+            )
+        }
+        _ => None,
+    };
+    let state = AppState::new(config, config_path, db, tasks, budget, agents, tools, memory, mind, jwt);
     Ok(Built {
         router: routes::router(state.clone()),
         state,

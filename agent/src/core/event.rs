@@ -118,6 +118,16 @@ impl EventSender {
         }
     }
 
+    /// 同一个 broadcast 与观察者，但以另一个会话 id 上报给观察者
+    /// （用于把同一执行器的用量归到不同来源）。
+    pub fn for_session(&self, session_id: &str) -> Self {
+        Self {
+            session_id: session_id.into(),
+            broadcast: self.broadcast.clone(),
+            observer: self.observer.clone(),
+        }
+    }
+
     pub fn send(&self, event: AgentEvent) {
         if let Some(observer) = &self.observer {
             observer.observe(&self.session_id, &event);

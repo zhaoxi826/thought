@@ -76,6 +76,41 @@ impl Jwt {
     }
 }
 
+/// 二次鉴权令牌的载荷：只用于查看她的内心，10 分钟有效，绑定到某个 admin。
+#[derive(Serialize, Deserialize, Debug, Clone)]
+struct InnerClaims {
+    sub: String,
+    scope: String,
+    iat: u64,
+    exp: u64,
+}
+
+/// 二次鉴权令牌有效期（秒）。
+pub const INNER_TTL_SECS: u64 = 600;
+const INNER_SCOPE: &str = "inner";
+
+impl Jwt {
+    /// 签发 `inner` 令牌（调用方须已重新校验过密码）。
+    pub fn issue_inner(&self, user_id: &str) -> Result<(String, u64), ApiError> {
+        let iat = jsonwebtoken::get_current_timestamp();
+        let claims = InnerClaims { sub: user_id.to_owned(), scope: INNER_SCOPE.to_owned(), iat, exp: iat + INNER_TTL_SECS };
+        let token = encode(&Header::new(Algorithm::HS256), &claims, &self.encoding)
+            .map_err(|e| ApiError::internal(format!("sign inner token: {e}")))?;
+        Ok((token, claims.exp))
+    }
+
+    /// 校验 `inner` 令牌：签名、有效期、scope，且必须属于当前登录的用户。
+    pub fn verify_inner(&self, token: &str, user_id: &str) -> Result<(), ApiError> {
+        let claims = decode::<InnerClaims>(token, &self.decoding, &self.validation)
+            .map(|d| d.claims)
+            .map_err(|_| ApiError::forbidden("invalid or expired inner token"))?;
+        if claims.scope != INNER_SCOPE || claims.sub != user_id {
+            return Err(ApiError::forbidden("invalid or expired inner token"));
+        }
+        Ok(())
+    }
+}
+
 pub fn hash_password(password: &str) -> Result<String, ApiError> {
     Argon2::default()
         .hash_password(password.as_bytes())
@@ -149,6 +184,13 @@ mod tests {
         assert!(other.verify(&token).is_err(), "wrong key");
         assert!(jwt.verify(&format!("{token}x")).is_err(), "tampered");
         assert!(Jwt::new(b"short", 60).is_err());
+
+        // inner 令牌：不能当登录 token 用，登录 token 也不能当 inner 用，且绑定用户
+        let (inner, _) = jwt.issue_inner("u1").unwrap();
+        assert!(jwt.verify_inner(&inner, "u1").is_ok());
+        assert!(jwt.verify_inner(&inner, "u2").is_err());
+        assert!(jwt.verify_inner(&token, "u1").is_err(), "login token is not an inner token");
+        assert!(jwt.verify(&inner).is_err(), "inner token is not a login token");
 
         let expired = Jwt { ttl_secs: 0, ..Jwt::new(&[7u8; 32], 0).unwrap() };
         let mut claims = jwt.verify(&token).unwrap();

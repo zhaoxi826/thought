@@ -59,3 +59,33 @@ pub(super) async fn me(AuthUser(claims): AuthUser) -> Json<Value> {
     Json(json!({ "id": claims.sub, "username": claims.name, "role": claims.role }))
 }
 
+
+#[derive(Deserialize)]
+pub(super) struct ElevateRequest {
+    password: String,
+}
+
+/// 二次鉴权：已登录的 admin 重新输入密码，换取 10 分钟的 `inner` 令牌，
+/// 用于查看她的内心（`X-Inner-Token` 头）。与登录共用失败限流。
+pub(super) async fn elevate(
+    State(state): State<AppState>,
+    crate::core::auth::AdminUser(claims): crate::core::auth::AdminUser,
+    Json(req): Json<ElevateRequest>,
+) -> Result<Json<Value>, ApiError> {
+    let key = format!("elevate:{}", claims.sub);
+    if let Some(secs) = state.inner.login_limiter.locked(&key) {
+        return Err(ApiError::new(
+            axum::http::StatusCode::TOO_MANY_REQUESTS,
+            format!("too many failed attempts; try again in {secs}s"),
+        ));
+    }
+    let user = state.db().find_user(&claims.name).await?;
+    let ok = user.as_ref().is_some_and(|u| u.id == claims.sub && verify_password(&req.password, &u.password_hash));
+    if !ok {
+        state.inner.login_limiter.failure(&key);
+        return Err(ApiError::unauthorized("wrong password"));
+    }
+    state.inner.login_limiter.success(&key);
+    let (token, expires_at) = state.jwt.issue_inner(&claims.sub)?;
+    Ok(Json(json!({ "inner_token": token, "expires_at": expires_at })))
+}

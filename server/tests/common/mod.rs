@@ -42,8 +42,10 @@ impl MockLlm {
                 tokio::spawn(async move {
                     let request = read_request(&mut socket).await;
                     let model = extract_model(&request);
-                    r.lock().unwrap().entry(model.clone()).or_default().push(request);
+                    r.lock().unwrap().entry(model.clone()).or_default().push(request.clone());
                     let body = q.lock().unwrap().get_mut(&model).and_then(VecDeque::pop_front);
+                    // 脚本里的 {{ID:名字}} 替换成请求上下文里"名字（id XXX）"的 id
+                    let body = body.map(|b| substitute_ids(&b, &request));
                     let (status, body) = match body {
                         Some(body) => ("200 OK", body),
                         None => ("500 Internal Server Error", format!("script exhausted for {model}")),
@@ -141,4 +143,23 @@ fn parse_content_length(headers: &[u8]) -> usize {
                 .flatten()
         })
         .unwrap_or(0)
+}
+
+/// 把 `{{ID:name}}` 替换成请求正文中 `name（id XXX）` 里的 XXX。
+fn substitute_ids(body: &str, request: &str) -> String {
+    let mut out = body.to_owned();
+    while let Some(start) = out.find("{{ID:") {
+        let Some(end) = out[start..].find("}}") else { break };
+        let name = &out[start + 5..start + end];
+        let marker = format!("{name}（id ");
+        let id = request
+            .find(&marker)
+            .map(|i| {
+                let rest = &request[i + marker.len()..];
+                rest[..rest.find('）').unwrap_or(0)].to_owned()
+            })
+            .unwrap_or_default();
+        out.replace_range(start..start + end + 2, &id);
+    }
+    out
 }

@@ -3981,6 +3981,7 @@ dependencies = [
  "axum",
  "futures",
  "jsonwebtoken 11.1.0",
+ "mind",
  "model",
  "plugin",
  "reqwest 0.13.4",

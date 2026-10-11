@@ -42,6 +42,8 @@ pub(crate) struct Inner {
     pub memory_cfg: RwLock<Option<MemorySection>>,
     /// 静态前端目录（SPA 兜底服务）。
     pub web_dir: PathBuf,
+    /// 心智（启用时）。
+    pub mind: Option<crate::mind::MindHandle>,
     /// 活跃会话：session id → 句柄。
     pub sessions: Mutex<HashMap<String, LiveSession>>,
 }
@@ -80,6 +82,7 @@ impl AppState {
         agents: AgentSystem,
         tools: Registry,
         memory: Option<MemoryStore>,
+        mind: Option<crate::mind::MindHandle>,
         jwt: Jwt,
     ) -> Self {
         Self {
@@ -95,6 +98,7 @@ impl AppState {
                 memory,
                 memory_cfg: RwLock::new(config.memory.clone()),
                 web_dir: config.http.web_dir.clone(),
+                mind,
                 sessions: Mutex::new(HashMap::new()),
             }),
             jwt: Arc::new(jwt),
@@ -121,6 +125,10 @@ impl AppState {
 
     pub(crate) fn budget(&self) -> &Budget {
         &self.inner.budget
+    }
+
+    pub(crate) fn mind(&self) -> Result<&crate::mind::MindHandle, ApiError> {
+        self.inner.mind.as_ref().ok_or_else(|| ApiError::not_found("mind is not enabled"))
     }
 
     pub(crate) fn db(&self) -> &Db {

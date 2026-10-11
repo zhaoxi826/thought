@@ -39,6 +39,10 @@ pub struct ServerConfig {
     /// token 预算（代谢）。
     #[serde(default)]
     pub budget: crate::core::budget::BudgetConfig,
+
+    /// 心智（思想）。缺省时不启用，对话走旧的每会话主控。
+    #[serde(default)]
+    pub mind: Option<crate::mind::MindSection>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]

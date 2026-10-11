@@ -188,6 +188,73 @@ impl AgentSystem {
     }
 }
 
+/// 劳动力：没有 L1 主控的会话，供外部的"心智"当作 L1 使用。
+///
+/// 提供派单 / 查询 / 取消工具；任务结果不进主控队列，而是交给 `on_done` 回调。
+/// 丢弃句柄时取消所有运行中的任务。
+pub struct Workforce {
+    _inbox: mpsc::UnboundedSender<Input>,
+    shared: Arc<Session>,
+    pump: tokio::task::JoinHandle<()>,
+}
+
+impl Drop for Workforce {
+    fn drop(&mut self) {
+        self.pump.abort();
+        self.shared.abort_all();
+    }
+}
+
+impl Workforce {
+    /// 派单、查询、取消三个工具（不含 `add_todo`：心智有自己的持久化待办）。
+    pub fn tools(&self) -> Registry {
+        crate::orchestration::tools::workforce_registry(&self.shared)
+    }
+
+    pub fn tasks(&self) -> Vec<TaskInfo> {
+        self.shared.tasks()
+    }
+
+    pub fn cancel_task(&self, task_id: u64) -> bool {
+        self.shared.cancel(task_id)
+    }
+
+    pub fn subscribe(&self) -> broadcast::Receiver<AgentEvent> {
+        self.shared.events.subscribe()
+    }
+}
+
+impl AgentSystem {
+    /// 启动一支劳动力。`on_done(task_id, worker, result)` 在每个任务结束（含失败，不含取消）时调用。
+    pub fn start_workforce(
+        &self,
+        session_id: impl Into<String>,
+        options: SessionOptions,
+        on_done: impl Fn(u64, String, Result<String, String>) + Send + Sync + 'static,
+    ) -> Workforce {
+        let session_id = session_id.into();
+        let (inbox, mut rx) = mpsc::unbounded_channel();
+        let events = EventSender::with_observer(&session_id, 1024, options.observer);
+        let shared = Arc::new(Session {
+            system: Arc::clone(&self.inner),
+            session_id,
+            inbox: inbox.downgrade(),
+            events,
+            next_task_id: AtomicU64::new(options.first_task_id.max(1)),
+            tasks: Mutex::new(BTreeMap::new()),
+            session_tools: options.tools,
+        });
+        let pump = tokio::spawn(async move {
+            while let Some(input) = rx.recv().await {
+                if let Input::TaskDone { task_id, worker, result } = input {
+                    on_done(task_id, worker, result);
+                }
+            }
+        });
+        Workforce { _inbox: inbox, shared, pump }
+    }
+}
+
 /// 会话句柄：向主控队列投递输入、订阅事件。
 #[derive(Clone)]
 pub struct SessionHandle {

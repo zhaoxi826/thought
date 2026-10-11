@@ -35,6 +35,16 @@ pub(crate) fn controller_registry(session: &Arc<Session>) -> Registry {
     registry
 }
 
+/// 劳动力的工具：派单、查询、取消（给外部心智当 L1 用）。
+pub(crate) fn workforce_registry(session: &Arc<Session>) -> Registry {
+    let mut registry = Registry::new();
+    registry
+        .register(Arc::new(DispatchTask(Arc::clone(session))))
+        .register(Arc::new(ListTasks(Arc::clone(session))))
+        .register(Arc::new(CancelTask(Arc::clone(session))));
+    registry
+}
+
 /// L2 worker 可用工具：配置的工具 + （允许时）`spawn_subagent`。
 pub(crate) fn worker_registry(session: &Arc<Session>, spec: &WorkerSpec, label: &str) -> Registry {
     let mut registry = session
