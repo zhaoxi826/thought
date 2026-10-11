@@ -21,8 +21,9 @@ impl Browser {
             Some(url) => (url.clone(), None),
             None => (format!("http://127.0.0.1:{}", config.port), Some(launch(&config)?)),
         };
+        // 冷启动在负载高时可能要十几秒（测试并行时尤其如此）
         let mut ws = Err(err("browser did not start"));
-        for _ in 0..100 {
+        for _ in 0..300 {
             ws = ws_url(&http).await;
             if ws.is_ok() {
                 break;
@@ -90,7 +91,7 @@ impl Browser {
             }
         };
         let mut ws = Err(err("browser did not restart"));
-        for _ in 0..100 {
+        for _ in 0..300 {
             ws = ws_url(&http).await;
             if ws.is_ok() {
                 break;
