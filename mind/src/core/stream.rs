@@ -34,8 +34,30 @@ pub enum Percept {
     /// 某人查看了她的内心（透明是双向的）。
     Observed { by: Person, range: String },
 
-    /// 进程重启后醒来；`slept_ms` 是距上次活动的时长。
-    Awake { slept_ms: i64 },
+    /// 进程启动后醒来；`slept_ms` 是距上次活动的时长；`first` 表示这是她第一次醒来。
+    Awake { slept_ms: i64, first: bool },
+}
+
+impl Percept {
+    /// 是否会让她醒来处理（被查看只是被感知，不单独触发一个回合）。
+    pub fn triggers(&self) -> bool {
+        !matches!(self, Percept::Observed { .. })
+    }
+
+    /// 是否是对外界的回应（有人说话或任务回来）；否则是她自主发起的。
+    pub fn responsive(&self) -> bool {
+        matches!(self, Percept::Heard { .. } | Percept::TaskDone { .. })
+    }
+
+    /// 用于回想检索的文本。
+    pub fn cue(&self) -> Option<&str> {
+        match self {
+            Percept::Heard { text, .. } | Percept::Due { text } => Some(text),
+            Percept::Drive { reason, .. } => Some(reason),
+            Percept::TaskDone { result, .. } => Some(result),
+            Percept::Observed { .. } | Percept::Awake { .. } => None,
+        }
+    }
 }
 
 /// 她发出的一次表达。
@@ -46,6 +68,8 @@ pub enum Expressed {
     Said { to: String, text: String },
     /// 自言自语 / 思考（不发给任何人）。
     Thought { text: String },
+    /// 她用工具做了一件事（写文件、跑命令、派任务……），`summary` 是简述。
+    Acted { tool: String, summary: String },
 }
 
 /// 意识流上的一个时刻。`seq` 单调递增，是流的唯一顺序。
@@ -62,6 +86,24 @@ pub struct Moment {
 pub enum MomentBody {
     In { percept: Percept },
     Out { expressed: Expressed },
+}
+
+impl Moment {
+    pub fn percept(&self) -> Option<&Percept> {
+        match &self.body {
+            MomentBody::In { percept } => Some(percept),
+            MomentBody::Out { .. } => None,
+        }
+    }
+
+    /// 这个时刻涉及的人（他说的，或对他说的）。
+    pub fn person(&self) -> Option<&str> {
+        match &self.body {
+            MomentBody::In { percept: Percept::Heard { from, .. } } => Some(&from.id),
+            MomentBody::Out { expressed: Expressed::Said { to, .. } } => Some(to),
+            _ => None,
+        }
+    }
 }
 
 /// 一段较早的意识流被压缩成的摘要。

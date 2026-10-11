@@ -45,6 +45,11 @@ pub trait StreamStore: Send + Sync {
 
     /// 已被摘要覆盖到的最大 seq（工作记忆从它之后开始）。
     async fn summarized_through(&self) -> PortResult<u64>;
+
+    /// 她已经处理过的最大 seq：之后到来的感知是"还没回应的"。
+    async fn attended_through(&self) -> PortResult<u64>;
+
+    async fn mark_attended(&self, seq: u64) -> PortResult<()>;
 }
 
 // ---- 自我 ----
@@ -105,8 +110,9 @@ pub struct Recollection {
 pub trait MemoryPort: Send + Sync {
     async fn recall(&self, query: &str, limit: usize) -> PortResult<Vec<Recollection>>;
 
-    /// 写入一条记忆（压缩时沉淀要点、日记等）。返回记忆 id。
-    async fn remember(&self, content: &str, about: &[String], source: &str) -> PortResult<String>;
+    /// 写入一条记忆（压缩时沉淀要点、日记等）。`visibility` 为 `private` / `shared` / `public`。
+    /// 返回记忆 id。
+    async fn remember(&self, content: &str, about: &[String], visibility: &str, source: &str) -> PortResult<String>;
 
     /// 待整理量（待抽取段落 + 冻结关系），供"整理"驱动使用。
     async fn untidiness(&self) -> PortResult<u64>;
@@ -155,12 +161,25 @@ pub trait People: Send + Sync {
 
 // ---- 认知 ----
 
+/// 回合的性质：回应外界，还是她自主发起（只有后者受代谢硬上限约束）。
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum TurnKind {
+    Responsive,
+    Autonomous,
+}
+
 /// 执行一个回合：给定完整上下文（system + 渲染后的意识流）与工具，跑到她不再调用工具为止。
 /// 默认实现包装 `agent::Runner`；测试可以替换成脚本。
 #[async_trait]
 pub trait Cognition: Send + Sync {
     /// 返回本回合最后一段自由文本（回合内对人说话一律走 `say` 工具，这段文本视为她的思考）。
-    async fn think(&self, history: &mut Vec<model::Message>, tools: &plugin::Registry) -> PortResult<String>;
+    async fn think(
+        &self,
+        kind: TurnKind,
+        history: &mut Vec<model::Message>,
+        tools: &plugin::Registry,
+    ) -> PortResult<String>;
 }
 
 /// 时钟（测试可注入）。

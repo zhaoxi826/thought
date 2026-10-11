@@ -61,6 +61,11 @@ impl Registry {
         self.tools.contains_key(name)
     }
 
+    /// 全部工具（按名字有序）。
+    pub fn tools(&self) -> impl Iterator<Item = (&str, &Arc<dyn Tool>)> {
+        self.tools.iter().map(|(name, tool)| (name.as_str(), tool))
+    }
+
     /// 已注册的工具名（有序）。
     pub fn names(&self) -> impl Iterator<Item = &str> {
         self.tools.keys().map(String::as_str)

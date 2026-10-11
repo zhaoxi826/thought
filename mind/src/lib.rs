@@ -10,10 +10,12 @@
 pub mod core;
 pub mod heart;
 pub mod self_model;
+pub mod tools;
 
+pub use core::mind::{person, Mind, MindConfig, MindEvent, Ports};
 pub use core::ports::{
     Auditor, Clock, Cognition, Expression, MemoryPort, Metabolism, People, PortError, PortResult,
-    Recollection, Scheduled, SelfChange, SelfStore, StreamStore, SystemClock,
+    Recollection, Scheduled, SelfChange, SelfStore, StreamStore, SystemClock, TurnKind,
 };
 pub use core::stream::{Expressed, Moment, MomentBody, Percept, Person, Summary};
 pub use heart::{Drive, DriveKind, Outcome, Signals, Urge};
