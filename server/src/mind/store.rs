@@ -132,7 +132,7 @@ impl MindDb {
 
     /// 待办已投递：删除（先投递后删，投递失败下次还会再取到）。
     pub async fn finish_scheduled(&self, id: &str) {
-        if let Err(e) = self.exec("DELETE scheduled WHERE id = $id", json!({ "id": id })).await {
+        if let Err(e) = self.exec("DELETE scheduled WHERE item_id = $id", json!({ "id": id })).await {
             tracing::warn!("delete scheduled failed: {e}");
         }
     }
@@ -237,12 +237,18 @@ impl SelfStore for MindDb {
     }
 
     async fn schedule(&self, item: Scheduled) -> PortResult<()> {
-        self.exec("CREATE scheduled CONTENT $data", json!({ "data": item })).await
+        // 记录自带的 id 字段会被当成记录 id，另存一份 item_id 供删除定位
+        let mut data = serde_json::to_value(&item).map_err(port)?;
+        data["item_id"] = json!(item.id);
+        if let Some(o) = data.as_object_mut() {
+            o.remove("id");
+        }
+        self.exec("CREATE scheduled CONTENT $data", json!({ "data": data })).await
     }
 
     async fn take_due(&self, now_ms: i64) -> PortResult<Vec<Scheduled>> {
         self.query(
-            "SELECT * OMIT id FROM scheduled WHERE due_ms <= $now ORDER BY due_ms",
+            "SELECT item_id AS id, due_ms, text FROM scheduled WHERE due_ms <= $now ORDER BY due_ms",
             json!({ "now": now_ms }),
         )
         .await

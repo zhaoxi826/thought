@@ -223,3 +223,20 @@ async fn she_gets_browser_tools_and_her_profile_is_protected() {
     assert!(sb.protected.iter().any(|p| p == &profile), "{:?}", sb.protected);
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[tokio::test]
+async fn scheduled_items_survive_until_delivered() {
+    use mind::SelfStore;
+    let conn = surrealdb::engine::any::connect("mem://").await.unwrap();
+    let db = server::mind::store::MindDb::new(&conn, "t", "s").await.unwrap();
+    db.schedule(mind::Scheduled { id: "a1".into(), due_ms: 10, text: "看星星".into() }).await.unwrap();
+    db.schedule(mind::Scheduled { id: "a2".into(), due_ms: 99_999, text: "以后".into() }).await.unwrap();
+    // 取出但未确认：下次还在
+    assert_eq!(db.take_due(100).await.unwrap().len(), 1);
+    let due = db.take_due(100).await.unwrap();
+    assert_eq!(due[0].id, "a1");
+    assert_eq!(due[0].text, "看星星");
+    db.finish_scheduled("a1").await;
+    assert!(db.take_due(100).await.unwrap().is_empty());
+    assert_eq!(db.take_due(100_000).await.unwrap()[0].id, "a2");
+}
