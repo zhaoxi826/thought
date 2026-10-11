@@ -37,9 +37,9 @@ async fn run() -> Result<(), String> {
         .await
         .map_err(|e| e.to_string())?;
     let config = built.state.config();
-    if config.memory.is_some() {
-        server::spawn_memory_worker(built.state.clone(), MEMORY_MAINTENANCE_INTERVAL);
-    }
+    // 维护任务总是启动：记忆整理（有记忆时）+ 回收站 / 备份过期清理
+    server::spawn_memory_worker(built.state.clone(), MEMORY_MAINTENANCE_INTERVAL);
+    let _ = &config;
 
     let listener = tokio::net::TcpListener::bind(&config.http.bind)
         .await

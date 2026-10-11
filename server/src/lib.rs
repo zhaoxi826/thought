@@ -59,7 +59,8 @@ pub async fn build_from_file(path: &std::path::Path, extra_tools: Registry) -> R
     let mut config: ServerConfig = toml::from_str(&text).map_err(|e| fail(&format!("parse {}", path.display()), e))?;
     config.resolve_paths(&config::config_dir(path));
     let sandbox = sandbox::Sandbox::new(&config.effective_sandbox(Some(path))).map_err(|e| fail("sandbox", e))?;
-    let mut tools = plugin::tools::file_tools::builtin_registry(Arc::new(sandbox));
+    let sandbox = Arc::new(sandbox);
+    let mut tools = plugin::tools::file_tools::builtin_registry(Arc::clone(&sandbox));
     // 她专属的浏览器：启动失败不阻止服务启动，只是没有 browser_* 工具
     if let Some(cfg) = &config.browser {
         match browser::Browser::start(cfg.clone()).await {
@@ -71,7 +72,12 @@ pub async fn build_from_file(path: &std::path::Path, extra_tools: Registry) -> R
         }
     }
     tools.extend(&extra_tools);
-    build_inner(&config, Some(path.to_path_buf()), tools).await
+    let mut built = build_inner(&config, Some(path.to_path_buf()), tools).await?;
+    // 维护任务要用沙箱清理回收站：build_inner 之后补上（state 尚未被克隆出去）
+    if let Some(inner) = Arc::get_mut(&mut built.state.inner) {
+        inner.sandbox = Some(sandbox);
+    }
+    Ok(built)
 }
 
 /// 由配置构造模型池 + agent 系统（启动与配置热更新共用）。
@@ -181,35 +187,68 @@ async fn bootstrap_admin(config: &ServerConfig, db: &core::db::Db) -> Result<(),
     Ok(())
 }
 
-/// 记忆器后台维护：周期性处理抽取队列、冻结 / 清理衰减的关系。
+/// 后台维护：周期性处理抽取队列、冻结 / 清理衰减的关系；每天清理一次过期的回收站与备份。
 pub fn spawn_memory_worker(state: AppState, interval: Duration) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         let mut ticker = tokio::time::interval(interval);
+        let mut last_purge = std::time::Instant::now() - Duration::from_secs(86_400);
         loop {
             ticker.tick().await;
-            if let Err(e) = maintain_spaces(&state).await {
-                tracing::warn!("memory maintenance failed: {e}");
+            maintain_spaces(&state).await;
+            if last_purge.elapsed() >= Duration::from_secs(86_400) {
+                last_purge = std::time::Instant::now();
+                if let Some(sb) = &state.inner.sandbox {
+                    let removed = sb.fs.purge_older_than(TRASH_RETENTION_DAYS);
+                    if removed > 0 {
+                        tracing::info!(removed, "purged old trash / backup days");
+                    }
+                }
             }
         }
     })
 }
 
+/// 回收站与备份保留天数。
+pub const TRASH_RETENTION_DAYS: i64 = 30;
+
 /// 对所有记忆空间跑一轮：抽取至多 32 条待处理段落，然后衰减维护。
-pub async fn maintain_spaces(state: &AppState) -> Result<(), String> {
-    let Some(cfg) = state.memory_cfg() else {
-        return Ok(());
-    };
-    let owners: Vec<String> = if cfg.per_user {
-        let users = state.db().list_users().await.map_err(|e| e.message)?;
-        users.into_iter().map(|u| u.id).collect()
-    } else {
-        vec![String::new()]
-    };
-    for owner in owners {
-        if let Some(store) = state.memory_for(&owner).await.map_err(|e| e.message)? {
-            store.process_pending(32).await.map_err(|e| e.to_string())?;
-            store.maintain().await.map_err(|e| e.to_string())?;
+/// 包括她（心智）自己的 `mind` 空间；某个空间出错只记日志，不影响其余。
+pub async fn maintain_spaces(state: &AppState) {
+    let mut stores = Vec::new();
+    if state.inner.mind.is_some()
+        && let Some(root) = &state.inner.memory
+    {
+        match root.scoped("mind").await {
+            Ok(s) => stores.push(("mind".to_owned(), s)),
+            Err(e) => tracing::warn!("memory space mind: {e}"),
         }
     }
-    Ok(())
+    if let Some(cfg) = state.memory_cfg() {
+        let owners: Vec<String> = if cfg.per_user {
+            match state.db().list_users().await {
+                Ok(users) => users.into_iter().map(|u| u.id).collect(),
+                Err(e) => {
+                    tracing::warn!("list users for maintenance: {}", e.message);
+                    Vec::new()
+                }
+            }
+        } else {
+            vec![String::new()]
+        };
+        for owner in owners {
+            match state.memory_for(&owner).await {
+                Ok(Some(store)) => stores.push((owner, store)),
+                Ok(None) => {}
+                Err(e) => tracing::warn!(owner, "memory space: {}", e.message),
+            }
+        }
+    }
+    for (name, store) in stores {
+        if let Err(e) = store.process_pending(32).await {
+            tracing::warn!(space = %name, "extraction failed: {e}");
+        }
+        if let Err(e) = store.maintain().await {
+            tracing::warn!(space = %name, "maintenance failed: {e}");
+        }
+    }
 }

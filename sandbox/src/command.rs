@@ -151,6 +151,18 @@ impl CommandRunner {
                 c
             }
         };
+        // 不继承服务进程的环境：那里有 JWT 密钥、模型 API key、管理员密码。
+        // 只保留无害的基本变量；HOME 指向她的工作区。
+        cmd.env_clear();
+        for key in ["PATH", "LANG", "LC_ALL", "TZ", "TERM"] {
+            if let Ok(v) = std::env::var(key) {
+                cmd.env(key, v);
+            }
+        }
+        if std::env::var_os("PATH").is_none() {
+            cmd.env("PATH", "/usr/local/bin:/usr/bin:/bin");
+        }
+        cmd.env("HOME", &policy.workspace);
         let mut child = cmd
             .stdin(Stdio::null())
             .stdout(Stdio::piped())

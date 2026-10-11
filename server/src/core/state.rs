@@ -44,6 +44,8 @@ pub(crate) struct Inner {
     pub web_dir: PathBuf,
     /// 心智（启用时）。
     pub mind: Option<crate::mind::MindHandle>,
+    /// 文件与命令沙箱（从配置文件启动时），用于定期清理回收站。
+    pub sandbox: Option<Arc<sandbox::Sandbox>>,
     /// 活跃会话：session id → 句柄。
     pub sessions: Mutex<HashMap<String, LiveSession>>,
 }
@@ -99,6 +101,7 @@ impl AppState {
                 memory_cfg: RwLock::new(config.memory.clone()),
                 web_dir: config.http.web_dir.clone(),
                 mind,
+                sandbox: None,
                 sessions: Mutex::new(HashMap::new()),
             }),
             jwt: Arc::new(jwt),

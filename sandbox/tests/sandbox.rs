@@ -157,3 +157,19 @@ async fn bwrap_isolates_shell_from_outside_and_protected() {
     let out = e.sandbox.run(&format!("cat {}", notes.display())).await.unwrap();
     assert!(out.stdout.contains("original"));
 }
+
+/// 服务进程环境里的密钥不能泄露给命令。
+#[tokio::test]
+async fn commands_do_not_inherit_secrets_from_the_server_environment() {
+    // SAFETY: 测试进程内设置；其他测试不读这个变量
+    unsafe { std::env::set_var("THOUGHT_TEST_SECRET_SHOULD_NOT_LEAK", "s3cr3t") };
+    for isolation in [Isolation::None, Isolation::detect()] {
+        let e = env("envleak", Some(isolation.clone()));
+        let out = e.sandbox.run("env").await.unwrap();
+        assert!(!out.stdout.contains("s3cr3t"), "{isolation:?} leaked: {}", out.stdout);
+        assert!(out.stdout.contains("PATH="), "PATH kept");
+        let home = e.sandbox.run("echo $HOME").await.unwrap();
+        assert_eq!(home.stdout.trim(), e.sandbox.fs.workspace.to_string_lossy(), "HOME is her workspace");
+        drop(e);
+    }
+}
