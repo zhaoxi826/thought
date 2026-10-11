@@ -49,7 +49,7 @@ pub struct Built {
 /// 配置里的相对路径（如 `http.web_dir`）按进程工作目录解析；从配置文件加载时
 /// 用 [`build_from_file`]，它会改为相对配置文件所在目录，并启用配置读写接口。
 pub async fn build(config: &ServerConfig, tools: Registry) -> Result<Built, BuildError> {
-    build_inner(config, None, tools).await
+    build_inner(config, None, None, tools).await
 }
 
 /// 从配置文件组装：解析相对路径，按 `[sandbox]` 建好沙箱与内置工具，
@@ -72,12 +72,7 @@ pub async fn build_from_file(path: &std::path::Path, extra_tools: Registry) -> R
         }
     }
     tools.extend(&extra_tools);
-    let mut built = build_inner(&config, Some(path.to_path_buf()), tools).await?;
-    // 维护任务要用沙箱清理回收站：build_inner 之后补上（state 尚未被克隆出去）
-    if let Some(inner) = Arc::get_mut(&mut built.state.inner) {
-        inner.sandbox = Some(sandbox);
-    }
-    Ok(built)
+    build_inner(&config, Some(path.to_path_buf()), Some(sandbox), tools).await
 }
 
 /// 由配置构造模型池 + agent 系统（启动与配置热更新共用）。
@@ -92,6 +87,7 @@ pub(crate) fn build_agents(config: &ServerConfig, tools: &Registry) -> Result<Ag
 async fn build_inner(
     config: &ServerConfig,
     config_path: Option<std::path::PathBuf>,
+    sandbox: Option<Arc<sandbox::Sandbox>>,
     tools: Registry,
 ) -> Result<Built, BuildError> {
     let jwt_secret = secret(&config.auth.jwt_secret, &config.auth.jwt_secret_env)
@@ -161,7 +157,7 @@ async fn build_inner(
         }
         _ => None,
     };
-    let state = AppState::new(config, config_path, db, tasks, budget, agents, tools, memory, mind, jwt);
+    let state = AppState::new(config, config_path, db, tasks, budget, agents, tools, memory, mind, sandbox, jwt);
     Ok(Built {
         router: routes::router(state.clone()),
         state,

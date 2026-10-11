@@ -85,6 +85,7 @@ impl AppState {
         tools: Registry,
         memory: Option<MemoryStore>,
         mind: Option<crate::mind::MindHandle>,
+        sandbox: Option<Arc<sandbox::Sandbox>>,
         jwt: Jwt,
     ) -> Self {
         Self {
@@ -101,7 +102,7 @@ impl AppState {
                 memory_cfg: RwLock::new(config.memory.clone()),
                 web_dir: config.http.web_dir.clone(),
                 mind,
-                sandbox: None,
+                sandbox,
                 sessions: Mutex::new(HashMap::new()),
             }),
             jwt: Arc::new(jwt),
