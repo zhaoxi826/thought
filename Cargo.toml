@@ -1,7 +1,7 @@
 [workspace]
 resolver = "3"
 
-members = ["agent", "model", "plugin", "sandbox", "server", "symbol", "thought-core"]
+members = ["agent", "mind", "model", "plugin", "sandbox", "server", "symbol", "thought-core"]
 
 
 [workspace.dependencies]
@@ -32,6 +32,7 @@ plugin = {path = "plugin"}
 server = {path = "server"}
 symbol = {path = "symbol"}
 sandbox = {path = "sandbox"}
+mind = {path = "mind"}
 thought-core = {path = "thought-core"}
 # 发布用：cargo build --profile dist -p thought-core
 [profile.dist]

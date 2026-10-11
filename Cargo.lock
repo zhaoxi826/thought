@@ -2412,6 +2412,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "mind"
+version = "0.1.0"
+dependencies = [
+ "agent",
+ "async-trait",
+ "futures",
+ "model",
+ "plugin",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tokio-test",
+ "tracing",
+]
+
+[[package]]
 name = "mio"
 version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
