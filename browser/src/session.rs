@@ -42,7 +42,7 @@ impl Browser {
             cdp,
             state: Arc::new(Mutex::new(State { tabs: BTreeMap::new(), active: None })),
             config: Arc::new(config),
-            _child: child.map(Arc::new),
+            child: Arc::new(Mutex::new(child)),
         };
         // 新标签（含页面自己弹出的）都能被发现
         let _ = browser.cdp.call(None, "Target.setDiscoverTargets", json!({ "discover": true })).await;
@@ -66,6 +66,54 @@ impl Browser {
 
     pub fn is_alive(&self) -> bool {
         self.cdp.is_alive()
+    }
+
+    /// 连接断了（Chromium 崩溃 / 被杀）：重新拉起她自己的 Chromium 并重连，标签页重新接管。
+    /// 连接的是外部浏览器（`connect`）时只尝试重连。profile 在磁盘上，登录态不丢。
+    pub async fn ensure_alive(&self) -> CdpResult<()> {
+        if self.cdp.is_alive() {
+            return Ok(());
+        }
+        let mut child = self.child.lock().await;
+        if self.cdp.is_alive() {
+            return Ok(()); // 别的调用已经重启好了
+        }
+        tracing::warn!("browser connection lost; restarting");
+        let http = match &self.config.connect {
+            Some(url) => url.clone(),
+            None => {
+                if let Some(mut old) = child.take() {
+                    let _ = old.kill().await;
+                }
+                *child = Some(launch(&self.config)?);
+                format!("http://127.0.0.1:{}", self.config.port)
+            }
+        };
+        let mut ws = Err(err("browser did not restart"));
+        for _ in 0..100 {
+            ws = ws_url(&http).await;
+            if ws.is_ok() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        self.cdp.reconnect(&ws?).await?;
+        drop(child);
+        let _ = self
+            .cdp
+            .call(
+                None,
+                "Browser.setDownloadBehavior",
+                json!({ "behavior": "allow", "downloadPath": self.config.download_dir, "eventsEnabled": true }),
+            )
+            .await;
+        let _ = self.cdp.call(None, "Target.setDiscoverTargets", json!({ "discover": true })).await;
+        {
+            let mut st = self.state.lock().await;
+            st.tabs.clear();
+            st.active = None;
+        }
+        Ok(())
     }
 
     pub fn cdp(&self) -> &Cdp {
@@ -153,6 +201,7 @@ impl Browser {
     /// 当前标签页的 session。顺带同步标签页：接管页面自己弹出的新标签，
     /// 移除已经关闭 / 崩溃的标签（当前标签没了就换到另一个，一个都没有就新开一个）。
     pub async fn session(&self) -> CdpResult<String> {
+        self.ensure_alive().await?;
         self.sync_tabs().await;
         {
             let st = self.state.lock().await;

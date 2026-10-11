@@ -152,6 +152,18 @@ async fn she_can_drive_a_real_chromium() {
     let r = call(&tools, "browser_click", serde_json::json!({ "ref": 9999 })).await;
     assert!(r.contains("element not found"), "{r}");
 
+    // Chromium 崩溃（被杀）：下一次工具调用自动重启，cookie / 登录态在 profile 里还在
+    call(&tools, "browser_cookies", serde_json::json!({ "action": "set", "cookie": { "name": "keep", "value": "1", "url": site, "expires": 4_000_000_000u64 } })).await;
+    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    let pid = browser.cdp().call(None, "SystemInfo.getProcessInfo", serde_json::json!({})).await.unwrap()["processInfo"]
+        .as_array().unwrap().iter().find(|p| p["type"] == "browser").map(|p| p["id"].as_i64().unwrap()).unwrap();
+    let _ = std::process::Command::new("kill").arg("-9").arg(pid.to_string()).status();
+    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    assert!(!browser.is_alive());
+    let r = call(&tools, "browser_navigate", serde_json::json!({ "url": site })).await;
+    assert!(r.contains("测试页"), "restarted: {r}");
+    assert!(browser.is_alive());
+
     drop(tools);
     drop(browser);
     let _ = std::fs::remove_dir_all(&root);

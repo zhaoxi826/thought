@@ -89,8 +89,8 @@ pub struct Browser {
     pub(crate) cdp: Cdp,
     pub(crate) state: Arc<Mutex<State>>,
     pub config: Arc<BrowserConfig>,
-    /// 自己启动的进程：最后一个句柄丢弃时一并结束（kill_on_drop）。
-    pub(crate) _child: Option<Arc<tokio::process::Child>>,
+    /// 自己启动的进程：最后一个句柄丢弃时一并结束（kill_on_drop）；崩溃重启时替换。
+    pub(crate) child: Arc<Mutex<Option<tokio::process::Child>>>,
 }
 
 /// 选择器 / 编号 / 坐标：定位一个元素或位置。

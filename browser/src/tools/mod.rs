@@ -42,8 +42,8 @@ impl Tool for BrowserTool {
             Ok(v) => v,
             Err(e) => return format!("invalid arguments for {}: {e}", self.name),
         };
-        if !self.browser.is_alive() {
-            return "the browser connection is closed".to_owned();
+        if let Err(e) = self.browser.ensure_alive().await {
+            return format!("the browser is down and could not be restarted: {e}");
         }
         (self.handler)(Arc::clone(&self.browser), args).await
     }
