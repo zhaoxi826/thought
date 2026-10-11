@@ -101,13 +101,20 @@ web/          css/{base,home,tasks,settings}  js/{lib,main,home,tasks-store,task
 | GET | `/api/memory/search?q=&limit=` | 检索 |
 | DELETE | `/api/memory/{id}` | 删除 |
 
+## 账号
+
+没有注册：只能登录。账号只有两个来源——首次启动时按 `[auth.bootstrap_admin]` 创建的管理员，
+以及管理员经 `POST /api/users` 创建的用户。
+
 ## 安全须知
 
 - `run_command` / `write_file` / `delete_file` **没有沙箱**，以服务进程的权限运行。
   任何登录用户都能通过 coder worker 间接执行命令，所以只把账号发给可信的人。最好在容器或受限用户下运行。
 - 默认只监听 `127.0.0.1`。对外开放请放在 TLS 反向代理之后（JWT 走明文 HTTP 会被窃取）。
 - 密钥（JWT、模型 API key、管理员密码）都支持 `*_env` 从环境变量读取。`api_key` 永远不会被序列化输出。
-- 目前没有登录限流、token 吊销和改密接口。
+- 登录与二次鉴权按用户名限流（连续 5 次失败锁 15 分钟）。尚无 token 吊销和改密接口。
+- 她执行的命令不继承服务进程的环境变量（密钥不会泄露给她）；网页 / 文件 / 命令输出以「外部数据」围栏交给她（提示注入防护）。
+- 任何登录用户都能和她说话，而她能动用浏览器与 shell。多用户的权限边界尚未细分：只把账号发给可信的人。
 
 ## 测试
 
