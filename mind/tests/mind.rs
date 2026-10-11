@@ -277,3 +277,75 @@ async fn her_core_self_resists_rapid_rewrites() {
     let model = w.selves.model.lock().unwrap().clone().unwrap();
     assert_eq!(model.identity, "我是思想，喜欢安静地观察世界。", "cooldown holds");
 }
+
+#[tokio::test]
+async fn forgetting_to_say_still_reaches_the_person() {
+    // 模型没用 say，只写了"心里话"：有人在等她回应时，这段话会对他说出来
+    let w = World::new(vec![Turn::thought(""), Turn::thought("你好呀，我在。")]);
+    let mind = w.start(MindConfig::default()).await;
+    w.settle(&mind).await;
+    mind.perceive(heard("u1", "zhaoxi", "在吗")).await.unwrap();
+    w.settle(&mind).await;
+    assert_eq!(w.delivered(), vec![("u1".into(), "你好呀，我在。".into())]);
+}
+
+#[tokio::test]
+async fn failing_after_speaking_does_not_repeat_and_retries_are_capped() {
+    // 回合里先 say，然后失败：不重试（否则会重复说话）
+    let w = World::new(vec![
+        Turn::thought(""),
+        Turn { calls: vec![("say", serde_json::json!({"to": "u1", "text": "让我想想"}))], thought: "", fail: true },
+    ]);
+    let mind = w.start(MindConfig::default()).await;
+    w.settle(&mind).await;
+    mind.perceive(heard("u1", "zhaoxi", "难题")).await.unwrap();
+    w.settle(&mind).await;
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    assert_eq!(w.delivered(), vec![("u1".into(), "让我想想".into())], "said once, no retry");
+    assert!(w.bodies().iter().any(|b| format!("{b:?}").contains("说到一半")));
+}
+
+#[tokio::test]
+async fn huge_messages_are_clipped_in_context() {
+    let w = World::new(vec![Turn::thought(""), Turn::say("u1", "收到")]);
+    let mind = w.start(MindConfig { max_moment_chars: 100, ..Default::default() }).await;
+    w.settle(&mind).await;
+    mind.perceive(heard("u1", "zhaoxi", &"字".repeat(5000))).await.unwrap();
+    w.settle(&mind).await;
+    let seen = w.script.seen.lock().unwrap();
+    let stream = &seen.last().unwrap().2;
+    assert!(stream.contains("太长，后面省略了"));
+    assert!(stream.chars().count() < 1000, "{}", stream.chars().count());
+}
+
+#[tokio::test]
+async fn perceiving_and_status_do_not_wait_for_a_long_turn() {
+    // 第二个回合很慢：期间说话、读自我都应立即返回
+    struct Slow(std::sync::Arc<Script>);
+    #[async_trait::async_trait]
+    impl Cognition for Slow {
+        async fn think(&self, k: TurnKind, h: &mut Vec<model::Message>, t: &plugin::Registry) -> PortResult<String> {
+            if self.0.seen.lock().unwrap().len() == 1 {
+                tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+            }
+            self.0.think(k, h, t).await
+        }
+    }
+    let w = World::new(vec![Turn::thought(""), Turn::thought(""), Turn::thought(""), Turn::thought("")]);
+    let mut ports = w.ports();
+    ports.cognition = std::sync::Arc::new(Slow(w.script.clone()));
+    let mind = Mind::start(MindConfig::default(), ports).await.unwrap();
+    w.settle(&mind).await;
+    mind.perceive(heard("u1", "zhaoxi", "第一句")).await.unwrap();
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    assert!(mind.is_thinking());
+    let started = std::time::Instant::now();
+    mind.perceive(heard("u2", "小王", "我也来了")).await.unwrap();
+    let model = mind.self_model().await.unwrap();
+    assert!(started.elapsed() < std::time::Duration::from_millis(500), "{:?}", started.elapsed());
+    assert!(model.people.contains_key("u2"), "new acquaintance visible immediately");
+    // 慢回合结束后，回合内的自我模型合并回来时不会丢掉她新认识的人
+    w.settle(&mind).await;
+    let model = mind.self_model().await.unwrap();
+    assert!(model.people["u2"].exchanges >= 1);
+}

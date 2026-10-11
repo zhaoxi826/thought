@@ -11,7 +11,7 @@ use plugin::Registry;
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use tokio::sync::{broadcast, mpsc, oneshot};
+use tokio::sync::{broadcast, mpsc};
 
 /// 心智配置。
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -32,10 +32,19 @@ pub struct MindConfig {
     pub inbox_capacity: usize,
     /// 连续失败多少次后熔断退避。
     pub breaker_threshold: u32,
+    /// 一批感知连续失败多少次后放弃（记一笔、不再重试）。
+    pub max_retries: u32,
+    /// 意识流里单条时刻渲染的字符上限。
+    pub max_moment_chars: usize,
+    /// 注入上下文的意识流总字符上限。
+    pub max_stream_chars: usize,
     /// 她的身体与环境（宿主填写，注入 system）。
     #[serde(skip)]
     pub body: String,
 }
+
+/// 回想检索线索的字符上限。
+const MAX_CUE_CHARS: usize = 2000;
 
 impl Default for MindConfig {
     fn default() -> Self {
@@ -48,6 +57,9 @@ impl Default for MindConfig {
             tz_offset_min: 8 * 60,
             inbox_capacity: 256,
             breaker_threshold: 3,
+            max_retries: 5,
+            max_moment_chars: 4000,
+            max_stream_chars: 60_000,
             body: String::new(),
         }
     }
@@ -86,27 +98,41 @@ pub struct Ports {
     pub summarizer: Option<Arc<dyn Cognition>>,
 }
 
-enum Command {
-    Perceive(Percept, Option<oneshot::Sender<PortResult<Moment>>>),
-    /// 失败退避后重试积压的感知（不写入新感知）。
+/// 唤醒心智循环的信号（感知已写入意识流）。
+enum Wake {
+    /// 有新感知；`drive` 为点火的驱动名（如果是驱动感知）。
+    Percept { drive: Option<String> },
+    /// 失败退避后重试积压的感知。
     Retry,
-    /// 回合结束后由驱动层读取。
-    Snapshot(oneshot::Sender<SelfModel>),
 }
 
 /// 心智句柄。`Clone` 廉价；所有句柄丢弃后心智停止。
+///
+/// 感知在调用方这边立即写入意识流（不等正在进行的回合），然后唤醒心智循环；
+/// 自我模型放在共享锁里，读取也不经过循环。所以她在长回合里时，
+/// 别人说话、看状态、心跳都不会被卡住。
 #[derive(Clone)]
 pub struct Mind {
-    tx: mpsc::Sender<Command>,
+    wake: mpsc::Sender<Wake>,
+    shared: Arc<Shared>,
     events: broadcast::Sender<MindEvent>,
     outcomes: broadcast::Sender<(Option<String>, Outcome)>,
     thinking: Arc<std::sync::atomic::AtomicBool>,
 }
 
+/// 句柄与循环共享的状态。
+struct Shared {
+    stream: Arc<dyn StreamStore>,
+    clock: Arc<dyn Clock>,
+    self_model: std::sync::RwLock<SelfModel>,
+    /// 感知写入串行化：保证 seq 顺序与"认识的人"更新一致。
+    record: tokio::sync::Mutex<()>,
+}
+
 impl Mind {
     /// 启动心智：加载自我、写入苏醒感知、开始循环。
     pub async fn start(config: MindConfig, ports: Ports) -> PortResult<Self> {
-        let (tx, rx) = mpsc::channel(config.inbox_capacity);
+        let (wake, rx) = mpsc::channel(config.inbox_capacity);
         let (events, _) = broadcast::channel(1024);
         let (outcomes, _) = broadcast::channel(64);
         let thinking = Arc::new(std::sync::atomic::AtomicBool::new(false));
@@ -123,26 +149,63 @@ impl Mind {
         let last = ports.stream.latest(1).await?.pop();
         let slept = last.map_or(0, |m| now - m.at_ms);
 
-        let mind = Self { tx: tx.clone(), events: events.clone(), outcomes: outcomes.clone(), thinking: Arc::clone(&thinking) };
-        let core = Core { config, ports, self_model, events, outcomes, thinking, failures: 0, retry: tx.downgrade() };
+        let shared = Arc::new(Shared {
+            stream: Arc::clone(&ports.stream),
+            clock: Arc::clone(&ports.clock),
+            self_model: std::sync::RwLock::new(self_model),
+            record: tokio::sync::Mutex::new(()),
+        });
+        let mind = Self {
+            wake: wake.clone(),
+            shared: Arc::clone(&shared),
+            events: events.clone(),
+            outcomes: outcomes.clone(),
+            thinking: Arc::clone(&thinking),
+        };
+        let core = Core { config, ports, shared, events, outcomes, thinking, failures: 0, retry: wake.downgrade() };
         tokio::spawn(core.run(rx));
         mind.perceive(Percept::Awake { slept_ms: slept, first }).await?;
         Ok(mind)
     }
 
-    /// 投递一条感知，返回写入意识流后的时刻。
+    /// 投递一条感知：立即写入意识流并返回该时刻（不等她当前的回合结束）。
     pub async fn perceive(&self, percept: Percept) -> PortResult<Moment> {
-        let (reply, rx) = oneshot::channel();
-        self.tx
-            .send(Command::Perceive(percept, Some(reply)))
-            .await
-            .map_err(|_| PortError("mind stopped".into()))?;
-        rx.await.map_err(|_| PortError("mind stopped".into()))?
+        let triggers = percept.triggers();
+        let drive = match &percept {
+            Percept::Drive { drive, .. } => Some(drive.clone()),
+            _ => None,
+        };
+        let moment = {
+            let _guard = self.shared.record.lock().await;
+            let now = self.shared.clock.now_ms();
+            if let Percept::Heard { from, .. } = &percept {
+                let mut model = self.shared.self_model.write().expect("self model poisoned");
+                let a = model.people.entry(from.id.clone()).or_insert_with(|| Acquaintance {
+                    name: from.name.clone(),
+                    ..Default::default()
+                });
+                a.last_seen_ms = now;
+                a.exchanges += 1;
+            }
+            self.shared.stream.append(now, MomentBody::In { percept }).await?
+        };
+        let _ = self.events.send(MindEvent::Moment { moment: moment.clone() });
+        if triggers {
+            // 队列满说明循环已有大量待唤醒信号：丢掉这一个无妨，感知已在流里
+            let _ = self.wake.try_send(Wake::Percept { drive });
+        }
+        Ok(moment)
     }
 
-    /// 投递一条感知，不等待（队列满时丢弃并返回 false）。
+    /// 投递一条感知，不等待写入结果（在后台写入）。
     pub fn perceive_nowait(&self, percept: Percept) -> bool {
-        self.tx.try_send(Command::Perceive(percept, None)).is_ok()
+        let mind = self.clone();
+        tokio::spawn(async move {
+            if let Err(e) = mind.perceive(percept).await {
+                tracing::warn!("perceive failed: {e}");
+            }
+        });
+        true
     }
 
     pub fn subscribe(&self) -> broadcast::Receiver<MindEvent> {
@@ -158,74 +221,46 @@ impl Mind {
         self.thinking.load(std::sync::atomic::Ordering::Relaxed)
     }
 
-    /// 当前自我模型的快照。
+    /// 当前自我模型的快照（不等待回合）。
     pub async fn self_model(&self) -> PortResult<SelfModel> {
-        let (reply, rx) = oneshot::channel();
-        self.tx.send(Command::Snapshot(reply)).await.map_err(|_| PortError("mind stopped".into()))?;
-        rx.await.map_err(|_| PortError("mind stopped".into()))
+        if self.wake.is_closed() {
+            return Err(PortError("mind stopped".into()));
+        }
+        Ok(self.shared.self_model.read().expect("self model poisoned").clone())
     }
 }
 
 struct Core {
     config: MindConfig,
     ports: Ports,
-    self_model: SelfModel,
+    shared: Arc<Shared>,
     events: broadcast::Sender<MindEvent>,
     outcomes: broadcast::Sender<(Option<String>, Outcome)>,
     thinking: Arc<std::sync::atomic::AtomicBool>,
     failures: u32,
-    retry: mpsc::WeakSender<Command>,
+    retry: mpsc::WeakSender<Wake>,
 }
 
 impl Core {
-    async fn run(mut self, mut rx: mpsc::Receiver<Command>) {
-        loop {
-            // 等第一条命令；之后把积压的全部收下（一次回合处理一批）
-            let Some(first) = rx.recv().await else { return };
-            let mut pending = false;
-            let mut drive: Option<String> = None;
-            let mut cmds = vec![first];
+    async fn run(mut self, mut rx: mpsc::Receiver<Wake>) {
+        // 等一个唤醒；之后把积压的唤醒全部收下（一次回合处理意识流里所有未回应的）
+        while let Some(first) = rx.recv().await {
+            let mut drive = None;
+            let mut wakes = vec![first];
             while let Ok(more) = rx.try_recv() {
-                cmds.push(more);
+                wakes.push(more);
             }
-            for cmd in cmds {
-                match cmd {
-                    Command::Snapshot(reply) => {
-                        let _ = reply.send(self.self_model.clone());
-                    }
-                    Command::Retry => pending = true,
-                    Command::Perceive(percept, reply) => {
-                        if let Percept::Drive { drive: d, .. } = &percept {
-                            drive = Some(d.clone());
-                        }
-                        pending |= percept.triggers();
-                        let result = self.record(percept).await;
-                        if let Some(reply) = reply {
-                            let _ = reply.send(result);
-                        }
-                    }
+            for w in wakes {
+                if let Wake::Percept { drive: Some(d) } = w {
+                    drive = Some(d);
                 }
             }
-            if pending {
-                self.turn(drive).await;
-            }
+            self.turn(drive).await;
         }
     }
 
-    /// 把感知写进意识流，并更新"认识的人"。
-    async fn record(&mut self, percept: Percept) -> PortResult<Moment> {
-        let now = self.ports.clock.now_ms();
-        if let Percept::Heard { from, .. } = &percept {
-            let a = self.self_model.people.entry(from.id.clone()).or_insert_with(|| Acquaintance {
-                name: from.name.clone(),
-                ..Default::default()
-            });
-            a.last_seen_ms = now;
-            a.exchanges += 1;
-        }
-        let moment = self.ports.stream.append(now, MomentBody::In { percept }).await?;
-        let _ = self.events.send(MindEvent::Moment { moment: moment.clone() });
-        Ok(moment)
+    fn model(&self) -> SelfModel {
+        self.shared.self_model.read().expect("self model poisoned").clone()
     }
 
     /// 一个回合：组装上下文 → 思考 → 收尾。
@@ -245,7 +280,8 @@ impl Core {
         }
 
         self.set_thinking(true);
-        let result = self.think(kind, &fresh).await;
+        let log = Arc::new(Mutex::new(TurnLog::default()));
+        let result = self.think(kind, &fresh, Arc::clone(&log)).await;
         self.set_thinking(false);
         match result {
             Ok(outcome) => {
@@ -256,17 +292,39 @@ impl Core {
                     tracing::warn!("compaction failed: {e}");
                 }
             }
-            Err(e) => self.fail(e.0).await,
+            Err(e) => {
+                let said = !log.lock().expect("turn log poisoned").said_to.is_empty();
+                if said || self.failures + 1 >= self.config.max_retries {
+                    // 她已经开口了（重试会重复说话），或这批感知总是失败：不再重试，记下就过去
+                    let _ = self.ports.stream.mark_attended(last_seq).await;
+                    self.failures = 0;
+                    let note = if said { "说到一半，思绪断了。" } else { "刚才怎么也想不清楚，先放下了。" };
+                    let _ = self.append_out(Expressed::Thought { text: note.into() }).await;
+                    let _ = self.events.send(MindEvent::TurnFailed { error: e.0, backoff_secs: None });
+                } else {
+                    self.fail(e.0).await;
+                }
+            }
         }
     }
 
-    async fn think(&mut self, kind: TurnKind, fresh: &[Moment]) -> PortResult<Outcome> {
+    async fn append_out(&self, expressed: Expressed) -> PortResult<Moment> {
+        let m = self.ports.stream.append(self.ports.clock.now_ms(), MomentBody::Out { expressed }).await?;
+        let _ = self.events.send(MindEvent::Moment { moment: m.clone() });
+        Ok(m)
+    }
+
+    async fn think(&mut self, kind: TurnKind, fresh: &[Moment], log: Arc<Mutex<TurnLog>>) -> PortResult<Outcome> {
         let now = self.ports.clock.now_ms();
         let people = self.ports.people.all().await?;
         let names: Names = people.iter().map(|p| (p.id.clone(), p.name.clone())).collect();
-        for p in &people {
-            self.self_model.people.entry(p.id.clone()).or_insert_with(|| Acquaintance { name: p.name.clone(), ..Default::default() });
+        {
+            let mut model = self.shared.self_model.write().expect("self model poisoned");
+            for p in &people {
+                model.people.entry(p.id.clone()).or_insert_with(|| Acquaintance { name: p.name.clone(), ..Default::default() });
+            }
         }
+        let self_model = self.model();
         let present: Vec<String> =
             people.iter().filter(|p| self.ports.expression.is_present(&p.id)).map(|p| p.name.clone()).collect();
 
@@ -276,8 +334,9 @@ impl Core {
         working.retain(|m| m.seq > through);
         let summaries = self.ports.stream.summaries(self.config.summaries).await?;
 
-        // 回想：以这次新到的感知为线索
+        // 回想：以这次新到的感知为线索（截断：检索只需要要点）
         let cue: String = fresh.iter().filter_map(Moment::percept).filter_map(Percept::cue).collect::<Vec<_>>().join("\n");
+        let cue: String = cue.chars().take(MAX_CUE_CHARS).collect();
         let recollections = match (&self.ports.memory, cue.is_empty()) {
             (Some(memory), false) => memory.recall(&cue, self.config.recall).await.unwrap_or_default(),
             _ => Vec::new(),
@@ -285,7 +344,7 @@ impl Core {
 
         let system = system_prompt(&ContextParts {
             origin: &self.config.origin,
-            self_model: &self.self_model,
+            self_model: &self_model,
             now_ms: now,
             tz_offset_min: self.config.tz_offset_min,
             summaries: &summaries,
@@ -294,13 +353,40 @@ impl Core {
             names: &names,
             body: &self.config.body,
         });
-        let attended = fresh.first().map_or(u64::MAX, |m| m.seq);
-        let mut stream_text = String::new();
-        for m in &working {
-            if m.seq == attended {
-                stream_text.push_str("\n—— 以下是你还没回应的 ——\n");
+        // 工作记忆 + 还没回应的感知（可能比工作记忆更早，例如她睡了很久）；
+        // 单条与总量都有字符上限，防止一条超长消息撑爆上下文
+        let first_fresh = fresh.first().map_or(u64::MAX, |m| m.seq);
+        let mut shown: Vec<&Moment> = working.iter().filter(|m| m.seq < first_fresh).collect();
+        shown.extend(fresh.iter().rev().take(self.config.working_memory).rev());
+        let mut lines: Vec<String> = Vec::new();
+        let mut budget = self.config.max_stream_chars;
+        for m in shown.iter().rev() {
+            let mut line = render_moment(m, &names, self.config.tz_offset_min);
+            if line.chars().count() > self.config.max_moment_chars {
+                let cut: String = line.chars().take(self.config.max_moment_chars).collect();
+                line = format!("{cut}…[太长，后面省略了]");
             }
-            stream_text.push_str(&render_moment(m, &names, self.config.tz_offset_min));
+            let len = line.chars().count();
+            if len > budget && !lines.is_empty() {
+                break;
+            }
+            budget = budget.saturating_sub(len);
+            if m.seq == first_fresh {
+                lines.push("—— 以下是你还没回应的 ——".into());
+                lines.reverse();
+                lines.push(line);
+                lines.reverse();
+                continue;
+            }
+            lines.push(line);
+        }
+        lines.reverse();
+        let mut stream_text = String::new();
+        for l in &lines {
+            if l.starts_with("—— 以下") {
+                stream_text.push('\n');
+            }
+            stream_text.push_str(l);
             stream_text.push('\n');
         }
         let mut history = vec![
@@ -313,8 +399,8 @@ impl Core {
 
         // 回合工具：心智工具 + 外部工具
         let turn = Arc::new(TurnState {
-            log: Mutex::new(TurnLog::default()),
-            self_model: Mutex::new(self.self_model.clone()),
+            log,
+            self_model: Mutex::new(self_model.clone()),
             now_ms: {
                 let clock = Arc::clone(&self.ports.clock);
                 Box::new(move || clock.now_ms())
@@ -330,23 +416,52 @@ impl Core {
         tools::register(&mut registry, deps, Arc::clone(&turn));
 
         let thought = self.ports.cognition.think(kind, &mut history, &registry).await?;
-
-        // 收尾：心里话进流；自我模型落库；隐私审计
         let thought = thought.trim();
-        if !thought.is_empty() {
-            let m = self
-                .ports
-                .stream
-                .append(self.ports.clock.now_ms(), MomentBody::Out { expressed: Expressed::Thought { text: thought.to_owned() } })
-                .await?;
-            let _ = self.events.send(MindEvent::Moment { moment: m });
+
+        // 兜底：有人在等她回应，她却一句话都没对人说、只写了"心里话"——多半是模型忘了用 say。
+        // 把这段话对最近对她说话的人说出来，免得对方什么都收不到。
+        let speaker = fresh.iter().rev().find_map(|m| match m.percept() {
+            Some(Percept::Heard { from, .. }) => Some(from.id.clone()),
+            _ => None,
+        });
+        let said_nothing = turn.log.lock().expect("turn log poisoned").said_to.is_empty();
+        if said_nothing
+            && !thought.is_empty()
+            && let Some(to) = speaker
+        {
+            tracing::info!("turn ended without say; delivering final text to {to}");
+            let expressed = Expressed::Said { to: to.clone(), text: thought.to_owned() };
+            let m = self.append_out(expressed.clone()).await?;
+            if let Err(e) = self.ports.expression.deliver(&m, &expressed).await {
+                tracing::warn!("fallback delivery failed: {e}");
+            }
+            turn.log.lock().expect("turn log poisoned").said_to.push(to);
+        } else if !thought.is_empty() {
+            // 收尾：心里话进流
+            self.append_out(Expressed::Thought { text: thought.to_owned() }).await?;
         }
+
+        // 自我模型：回合内 self_reflect 的改动合并回共享模型。
+        // people 的 last_seen / exchanges 在回合期间可能被新感知更新，按较大值合并
         let log = std::mem::take(&mut *turn.log.lock().expect("turn log poisoned"));
-        let new_model = turn.self_model.lock().expect("self model poisoned").clone();
-        let changed = new_model != self.self_model;
-        self.self_model = new_model;
+        let mut new_model = turn.self_model.lock().expect("self model poisoned").clone();
+        let changed = {
+            let mut shared = self.shared.self_model.write().expect("self model poisoned");
+            for (id, a) in new_model.people.iter_mut() {
+                if let Some(cur) = shared.people.get(id) {
+                    a.last_seen_ms = a.last_seen_ms.max(cur.last_seen_ms);
+                    a.exchanges = a.exchanges.max(cur.exchanges);
+                }
+            }
+            for (id, cur) in &shared.people {
+                new_model.people.entry(id.clone()).or_insert_with(|| cur.clone());
+            }
+            let changed = new_model != *shared;
+            *shared = new_model.clone();
+            changed
+        };
         if changed {
-            self.ports.selves.save(&self.self_model, None).await?;
+            self.ports.selves.save(&new_model, None).await?;
             if log.reflected {
                 let _ = self.events.send(MindEvent::SelfChanged);
             }
@@ -456,7 +571,7 @@ impl Core {
         tokio::spawn(async move {
             tokio::time::sleep(delay).await;
             if let Some(tx) = retry.upgrade() {
-                let _ = tx.send(Command::Retry).await;
+                let _ = tx.send(Wake::Retry).await;
             }
         });
     }

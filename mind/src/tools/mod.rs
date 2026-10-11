@@ -24,7 +24,7 @@ pub struct TurnLog {
 
 /// 回合内共享的可变状态。
 pub(crate) struct TurnState {
-    pub log: Mutex<TurnLog>,
+    pub log: Arc<Mutex<TurnLog>>,
     pub self_model: Mutex<SelfModel>,
     pub now_ms: Box<dyn Fn() -> i64 + Send + Sync>,
 }

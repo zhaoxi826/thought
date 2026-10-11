@@ -255,9 +255,6 @@ impl Cognition for Script {
     async fn think(&self, kind: TurnKind, history: &mut Vec<Message>, tools: &Registry) -> PortResult<String> {
         self.seen.lock().unwrap().push((kind, history[0].text().to_owned(), history[1].text().to_owned()));
         let turn = self.turns.lock().unwrap().pop_front().unwrap_or_else(|| Turn::thought(""));
-        if turn.fail {
-            return Err(PortError("scripted failure".into()));
-        }
         let calls: Vec<ToolCall> = turn
             .calls
             .iter()
@@ -270,6 +267,10 @@ impl Cognition for Script {
                 let out = tools.call(&c.name, &c.arguments).await.unwrap_or_else(|| format!("unknown tool {}", c.name));
                 history.push(Message::tool(&c.id, out));
             }
+        }
+        // 失败发生在工具调用之后（模拟"说到一半出错"）
+        if turn.fail {
+            return Err(PortError("scripted failure".into()));
         }
         history.push(Message::assistant(turn.thought));
         Ok(turn.thought.to_owned())
@@ -330,18 +331,22 @@ impl World {
         Mind::start(config, self.ports()).await.unwrap()
     }
 
-    /// 等心智处理完积压（不在思考且队列空）。
+    /// 等心智处理完积压：连续一段时间不在思考，且意识流不再增长。
     pub async fn settle(&self, mind: &Mind) {
-        for _ in 0..200 {
+        let mut quiet = 0;
+        let mut last_len = usize::MAX;
+        for _ in 0..400 {
             tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-            // 一次快照往返意味着之前的命令都已处理
-            let _ = mind.self_model().await;
-            if !mind.is_thinking() {
-                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-                if !mind.is_thinking() {
+            let len = self.stream.moments.lock().unwrap().len();
+            if !mind.is_thinking() && len == last_len {
+                quiet += 1;
+                if quiet >= 5 {
                     return;
                 }
+            } else {
+                quiet = 0;
             }
+            last_len = len;
         }
         panic!("mind did not settle");
     }
