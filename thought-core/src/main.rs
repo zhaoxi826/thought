@@ -59,16 +59,6 @@ async fn run() -> Result<(), String> {
         .map_err(|e| format!("serve: {e}"))
 }
 
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn example_config_parses() {
-        let text = include_str!("../../thought.example.toml");
-        let config: server::ServerConfig = toml::from_str(text).expect("example config should parse");
-        assert!(config.models.contains_key("deepseek"));
-        assert_eq!(config.agent.workers[0].name, "coder");
-    }
-}
 
 /// `thought restore <备份名> [CONFIG]`：从对象存储恢复。须先停服务（SurrealKV 文件只能被一个进程打开）。
 /// 不带备份名时列出可用的备份。
@@ -104,4 +94,15 @@ async fn restore(args: &[String]) -> Result<(), String> {
     let n = server::backup::restore(&config.storage.endpoint, &backup, &name).await?;
     println!("已恢复 {n} 个数据库。可以启动服务了。");
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn example_config_parses() {
+        let text = include_str!("../../thought.example.toml");
+        let config: server::ServerConfig = toml::from_str(text).expect("example config should parse");
+        assert!(config.models.contains_key("deepseek"));
+        assert_eq!(config.agent.workers[0].name, "coder");
+    }
 }
