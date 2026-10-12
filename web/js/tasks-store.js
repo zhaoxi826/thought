@@ -5,18 +5,16 @@
 //   - GET  /api/tasks/events                    全局任务事件流：一条 SSE，data 带 session_id
 //   - GET  /api/tasks/{sid}/{tid}               详情：持久化 events 回填活动流
 //   - POST /api/tasks/{sid}/{tid}/cancel        取消
-// 逐会话 SSE（GET /api/sessions/{id}/events）只为对话页保留：对话页订阅时才为该会话建一条，
-// 承载 reply / error 等 controller 事件。任务聚合只吃全局流，两条流不会重复计数。
+// 对话页走心智接口（/api/mind/*），不再有逐会话 SSE；她派出的任务 session_id = "mind"。
+// 她是否在想由对话页的事件流告知（setMind），供 worker chip 显示。
 //
 // 活动流合并：每个任务保存两份原始记录 —— persisted（详情接口回填）与 log（页面存活期内
 // 全局流收到的事件），渲染时（events getter）按 persisted → 去重后的 log 重放成 UI 结构。
 // 运行中 agent 段的文本可能尚未落库，由 log 补齐；落库后按子串去重。
 //
 // 对外接口：
-//   start(sessions)               登录后启动：sessions = [{id,title}]
-//   watchSession(s) / unwatchSession(id)   会话标题登记 / 会话删除后移除其任务
-//   subscribe(id, fn)             对话页订阅会话事件（按需建逐会话 SSE），返回退订函数
-//   waitOpen(id)                  等该会话 SSE 进入 open（发消息前调用，避免丢 reply）
+//   start()                       登录后启动
+//   mind / setMind({enabled, thinking})   心智状态（对话页维护）
 //   list() / get(key) / runningCount() / onChange(fn)
 //   loadView(view) / viewKeys(view) / viewState(view)   按筛选分页（tab 直接映射 status 参数）
 //   ensureDetail(key, force)      回填持久化活动事件（幂等；force 时失败可重试）
@@ -35,8 +33,7 @@ const TERMINAL = new Set(['done', 'error', 'cancelled']);
 const VIEW_STATUS = { all: '', running: 'running', done: 'done', failed: 'error,cancelled' };
 
 const tasks = new Map();          // `${sessionId}:${taskId}` -> task
-const titles = new Map();         // sessionId -> 会话标题
-const streams = new Map();        // sessionId -> 对话页逐会话 SSE 状态
+const mind = { enabled: false, thinking: false };
 const changeListeners = new Set();
 const pendingStubs = new Set();   // 初始列表加载期间由事件临时建出的任务
 const globalStream = { conn: null, timer: null, retryDelay: 1000, everOpened: false };
@@ -49,6 +46,12 @@ export const TasksStore = {
   get agents() { return agents; },
   get limits() { return agents?.limits || null; },
   setAgents(a) { agents = a; emitChange(); },
+  get mind() { return mind; },
+  setMind(patch) {
+    const before = `${mind.enabled}|${mind.thinking}`;
+    Object.assign(mind, patch);
+    if (`${mind.enabled}|${mind.thinking}` !== before) emitChange();
+  },
   setUnauthorizedHandler(fn) { unauthorized = fn; },
 
   onChange(fn) { changeListeners.add(fn); return () => changeListeners.delete(fn); },
@@ -67,8 +70,7 @@ export const TasksStore = {
   },
 
   /** 登录后启动：先连全局流再拉列表，列表加载期间到达的事件不会丢。可重入（重新登录）。 */
-  async start(sessionList) {
-    for (const s of sessionList) titles.set(s.id, s.title);
+  async start() {
     tasks.clear();
     for (const k of Object.keys(views)) delete views[k];
     initialLoading = true;
@@ -154,32 +156,6 @@ export const TasksStore = {
       throw e;
     }
   },
-
-  watchSession(s) { titles.set(s.id, s.title); },
-  unwatchSession(id) {
-    closeSessionStream(id);
-    titles.delete(id);
-    for (const k of [...tasks.keys()]) if (k.startsWith(`${id}:`)) tasks.delete(k);
-    emitChange();
-  },
-
-  /** 对话页订阅：按需建立该会话的 SSE；没有订阅者的会话流随即关闭。返回退订函数。 */
-  subscribe(id, fn) {
-    const s = sessionStream(id);
-    s.listeners.add(fn);
-    pruneSessionStreams();
-    return () => { s.listeners.delete(fn); pruneSessionStreams(); };
-  },
-
-  /** 等 SSE 进入 open；已在 open 立即返回。失败/超时（8s）也返回，不阻塞发送。 */
-  waitOpen(id) {
-    const s = sessionStream(id);
-    if (s.state === 'open') return Promise.resolve();
-    return new Promise((resolve) => {
-      const timer = setTimeout(resolve, 8000);
-      s.openWaiters.push(() => { clearTimeout(timer); resolve(); });
-    });
-  },
 };
 
 /** worker chip 用：某 worker 当前运行中的任务。 */
@@ -200,10 +176,9 @@ export function busiestSessionRunning() {
   return per.size ? Math.max(...per.values()) : 0;
 }
 
-/** controller 是否忙碌。只有对话页订阅中的会话有逐会话流，故只反映当前会话。 */
+/** 主控（心智启用时即她）是否忙碌：她在想。 */
 export function controllerBusy() {
-  for (const s of streams.values()) if (s.controllerBusy) return true;
-  return false;
+  return mind.thinking;
 }
 
 // ---------------------------------------------------------------- 内部：任务对象
@@ -224,7 +199,7 @@ function ensureTask(sessionId, taskId, worker) {
   t = {
     key: k, sessionId, taskId: Number(taskId),
     worker: worker || '?', label: `${worker || '?'}#${taskId}`,
-    get sessionTitle() { return titles.get(this.sessionId) || ''; },
+    get sessionTitle() { return this.sessionId === 'mind' ? '思想' : ''; },
     task: '', status: 'running',
     startedAt: Date.now(), finishedAt: null, result: null, error: null,
     tokens: 0, baseTokens: 0, liveTokens: 0,
@@ -487,85 +462,3 @@ function container(v, agentLabel, ts) {
   }
   return sub.events;
 }
-
-// ---------------------------------------------------------------- 内部：对话页逐会话 SSE
-
-function sessionStream(id) {
-  let s = streams.get(id);
-  if (!s) {
-    s = {
-      id, conn: null, listeners: new Set(), state: 'idle',
-      retryDelay: 1000, timer: null, openWaiters: [], controllerBusy: false,
-    };
-    streams.set(id, s);
-  }
-  connectSession(s);
-  return s;
-}
-
-/** 指数退避 1s→30s；401 全局回登录；404 视为会话已删除。 */
-function connectSession(s) {
-  if (s.conn || s.timer) return;
-  const auth = loadAuth();
-  if (!auth) return;
-  s.state = 'connecting';
-  s.conn = connectSSE(`/api/sessions/${s.id}/events`, auth.token, {
-    onOpen() {
-      s.state = 'open';
-      s.retryDelay = 1000;
-      releaseWaiters(s);
-    },
-    onEvent(name, raw) {
-      let data = raw;
-      if (name !== 'lagged') {
-        try { data = JSON.parse(raw); } catch { return; }
-      }
-      trackController(s, name, data);
-      for (const fn of s.listeners) {
-        try { fn(name, data); } catch (e) { console.error('会话事件监听者出错', e); }
-      }
-    },
-    onClose(status) {
-      s.conn = null;
-      s.state = 'closed';
-      releaseWaiters(s);
-      if (streams.get(s.id) !== s) return;
-      if (status === 401) { clearAuth(); unauthorized(); return; }
-      if (status === 404) { TasksStore.unwatchSession(s.id); return; }
-      s.timer = setTimeout(() => { s.timer = null; connectSession(s); }, s.retryDelay);
-      s.retryDelay = Math.min(s.retryDelay * 2, 30000);
-    },
-  });
-}
-
-function releaseWaiters(s) {
-  s.openWaiters.splice(0).forEach((fn) => fn());
-}
-
-function closeSessionStream(id) {
-  const s = streams.get(id);
-  if (!s) return;
-  streams.delete(id);
-  clearTimeout(s.timer);
-  if (s.conn) s.conn.close();
-  releaseWaiters(s);
-  if (s.controllerBusy) emitChange();
-}
-
-/** 关闭没有订阅者、也没人在等 open 的会话流。 */
-function pruneSessionStreams() {
-  for (const s of [...streams.values()]) {
-    if (!s.listeners.size && !s.openWaiters.length) closeSessionStream(s.id);
-  }
-}
-
-/** controller 忙碌态（worker chip 用）：controller 的过程事件视为忙，reply/error 落闲。 */
-function trackController(s, name, data) {
-  let busy = s.controllerBusy;
-  if (name === 'reply' || name === 'error') busy = false;
-  else if ((name === 'text_delta' || name === 'tool_call' || name === 'usage') && !AGENT_RE.test(data?.agent || '')) busy = true;
-  if (busy === s.controllerBusy) return;
-  s.controllerBusy = busy;
-  emitChange();
-}
-

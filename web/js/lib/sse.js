@@ -9,9 +9,10 @@
  *   onOpen()             连接建立（2xx）
  *   onClose(status)      连接断开。status 为 HTTP 状态码（如 401/404），0=流正常结束，-1=网络错误
  *                        调用方据此决定是否重连（4xx 不应重连）
+ * @param {object} [headers]  额外请求头（如 X-Inner-Token）
  * @returns {{close(): void}}  主动 close() 后不再回调 onClose
  */
-export function connectSSE(url, token, { onEvent, onOpen, onClose }) {
+export function connectSSE(url, token, { onEvent, onOpen, onClose }, headers = {}) {
   const ctrl = new AbortController();
   let closed = false;
 
@@ -29,7 +30,7 @@ export function connectSSE(url, token, { onEvent, onOpen, onClose }) {
     let status = -1;
     try {
       const resp = await fetch(url, {
-        headers: { Authorization: `Bearer ${token}` },
+        headers: { ...headers, Authorization: `Bearer ${token}` },
         signal: ctrl.signal,
       });
       status = resp.status;

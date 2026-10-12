@@ -1,7 +1,7 @@
 // fetch 封装：token 注入、401 全局处理、统一错误格式 {"error": "..."}
 //
-// 登录态存 localStorage（键 thought.auth）：{ token, expires_at(Unix 秒), user:{id,username,role} }。
-// 启动时先 GET /api/me 验证，过期或 401 即清除并回登录页。
+// 登录态存 sessionStorage（键 thought.auth）：{ token, expires_at(Unix 秒), user:{id,username,role} }。
+// 关闭标签页即失效，不跨标签页共享。启动时先 GET /api/me 验证，过期或 401 即清除并回登录页。
 
 const AUTH_KEY = 'thought.auth';
 
@@ -12,14 +12,24 @@ export class ApiError extends Error {
   }
 }
 
+// 迁移：旧版本存在 localStorage，模块加载时搬到 sessionStorage 并删除旧键。
+(function migrateLegacyAuth() {
+  try {
+    const legacy = localStorage.getItem(AUTH_KEY);
+    if (legacy === null) return;
+    if (sessionStorage.getItem(AUTH_KEY) === null) sessionStorage.setItem(AUTH_KEY, legacy);
+    localStorage.removeItem(AUTH_KEY);
+  } catch { /* 存储不可用（隐私模式等）时忽略 */ }
+})();
+
 export function loadAuth() {
   try {
-    const raw = localStorage.getItem(AUTH_KEY);
+    const raw = sessionStorage.getItem(AUTH_KEY);
     if (!raw) return null;
     const auth = JSON.parse(raw);
     // 过期即视为未登录
     if (!auth.token || (auth.expires_at && auth.expires_at * 1000 <= Date.now())) {
-      localStorage.removeItem(AUTH_KEY);
+      sessionStorage.removeItem(AUTH_KEY);
       return null;
     }
     return auth;
@@ -29,12 +39,13 @@ export function loadAuth() {
 }
 
 export function saveAuth(auth) {
-  localStorage.setItem(AUTH_KEY, JSON.stringify(auth));
+  sessionStorage.setItem(AUTH_KEY, JSON.stringify(auth));
 }
 
 export function clearAuth() {
   try {
-    localStorage.removeItem(AUTH_KEY);
+    sessionStorage.removeItem(AUTH_KEY);
+    localStorage.removeItem(AUTH_KEY); // 兜底清理旧键
   } catch { /* 忽略 */ }
 }
 

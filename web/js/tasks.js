@@ -92,7 +92,8 @@ function renderStatusBar(all) {
   const chips = [];
   if (agents) {
     const cBusy = controllerBusy();
-    chips.push(chip('controller', agents.controller?.model || '', cBusy, null, cBusy ? '执行中' : '待命'));
+    if (TasksStore.mind.enabled) chips.push(chip('思想', '', cBusy, null, cBusy ? '在想' : '安静'));
+    else chips.push(chip('controller', agents.controller?.model || '', cBusy, null, cBusy ? '执行中' : '待命'));
     for (const w of agents.workers || []) {
       const list = busy.get(w.name) || [];
       chips.push(chip(w.name, w.model, list.length > 0, list[0]?.taskId, list.length > 0 ? '执行中' : '空闲'));
@@ -294,7 +295,9 @@ function detailHead(t) {
       h('div', { class: 'th-sub' },
         document.createTextNode('模型 '),
         h('span', { class: 'model', text: spec?.model || '—' }),
-        document.createTextNode(` · 由 controller 派单 · 会话「${t.sessionTitle || t.sessionId}」`),
+        document.createTextNode(t.sessionId === 'mind'
+          ? ' · 由思想派出'
+          : ` · 由 controller 派单 · 会话「${t.sessionTitle || t.sessionId}」`),
       ),
     ),
     h('div', { class: 'th-stats' },

@@ -203,7 +203,7 @@ setUnauthorizedHandler(showLogin);
 TasksStore.setUnauthorizedHandler(showLogin);
 
 // 模块初始化（数据启动在登录成功后）
-HomePage.init({ switchPage: Nav.switchPage, focusTask: (key) => TasksPage.focusTask(key) });
+HomePage.init({ focusTask: (key) => TasksPage.focusTask(key), onUnauthorized: showLogin });
 TasksPage.init({ switchPage: Nav.switchPage });
 SettingsPage.init();
 

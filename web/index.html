@@ -67,8 +67,8 @@
         <span class="seal"></span>
       </div>
 
-      <div class="side-label">会话<button class="new-session" id="new-session" type="button">+ 新会话</button></div>
-      <nav class="sessions" id="sessions"></nav>
+      <!-- 她的状态：GET /api/mind/status -->
+      <div class="her" id="her" aria-live="polite"></div>
 
       <div class="side-foot">
         <div class="side-entry" id="memory-entry">
@@ -95,19 +95,27 @@
     <!-- 主区 -->
     <main>
       <header>
-        <div class="conv-title" id="conv-title">thought<span class="conv-sub" id="conv-sub"></span></div>
+        <div class="conv-title" id="conv-title">思想<span class="conv-sub" id="conv-sub"></span></div>
+        <div class="view-tabs" id="view-tabs" hidden>
+          <button type="button" class="on" data-view="talk">对话</button>
+          <button type="button" data-view="inner">内心</button>
+        </div>
       </header>
 
       <div class="scroll" id="home-scroll">
         <div class="column" id="home-column"></div>
       </div>
 
-      <footer>
+      <div class="scroll" id="inner-scroll" hidden>
+        <div class="column" id="inner-column"></div>
+      </div>
+
+      <footer id="home-footer">
         <div class="composer">
           <div class="box">
-            <textarea id="composer-input" rows="1" placeholder="继续这个话题"></textarea>
+            <textarea id="composer-input" rows="1" placeholder="和她说点什么" aria-label="消息"></textarea>
           </div>
-          <div class="send" id="composer-send">
+          <div class="send" id="composer-send" role="button" tabindex="0" aria-label="发送">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#faf7f2" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <path d="M22 2 11 13M22 2l-7 20-4-9-9-4 20-7z"/>
             </svg>
