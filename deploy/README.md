@@ -60,6 +60,22 @@ bubblewrap 需要在服务内创建非特权 user namespace 并挂载，以下�
 - `RestrictSUIDSGID=`：seccomp 过滤挡住 bwrap 的 mount 调用（`Can't open source /: Function not implemented`）。`NoNewPrivileges=yes` 已经让 SUID 提权失效。
 - `ProtectKernelTunables=`：`/proc` 被部分覆盖后 bwrap 无法挂载新的 proc。
 
+## 备份与恢复
+
+在设置页（或 `thought.toml` 的 `[backup]`）配置 S3 兼容对象存储与加密口令。之后每天定点自动备份，
+也可以在设置页里点「立即备份」。备份在本机用口令加密后才上传，对象存储里只有密文。
+**口令务必另外保存**，丢了备份就打不开。
+
+恢复会用备份覆盖当前全部数据，所以只能在命令行做，而且要先停服务：
+
+```bash
+sudo systemctl stop thought
+sudo -u thought /home/thought/thought/bin/thought restore /home/thought/thought/thought.toml   # 列出备份
+sudo -u thought env $(cat /home/thought/thought/thought.env | xargs) \
+  /home/thought/thought/bin/thought restore thought-20261012-040000.thbk /home/thought/thought/thought.toml
+sudo systemctl start thought
+```
+
 ## 运维
 
 | 操作 | 命令 |
@@ -68,4 +84,4 @@ bubblewrap 需要在服务内创建非特权 user namespace 并挂载，以下�
 | 恢复 | `POST /api/mind/resume` |
 | 看今日用量 | `GET /api/mind/budget` |
 | 停服务 | `sudo systemctl stop thought` |
-| 备份数据 | 停服务后复制 `/home/thought/thought/data/` |
+| 备份数据 | 设置页「立即备份」或 `POST /api/backup/run`；离线也可停服务后复制 `data/` |
