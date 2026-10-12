@@ -11,6 +11,7 @@
 // 表单部件在 js/settings-form.js。
 
 import { api, apiRaw, ApiError } from './lib/api.js';
+import { bindBackupRun, defaultBackup, paintBackupCard, refreshBackup } from './settings-backup.js';
 import { h } from './lib/dom.js';
 import { TasksStore } from './tasks-store.js';
 import { wireInput, wireSwitch, renderModels, renderAgent, resetForm } from './settings-form.js';
@@ -57,6 +58,7 @@ export const SettingsPage = {
 // ---------------------------------------------------------------- 加载
 
 async function load({ keepNotice = false } = {}) {
+  refreshBackup();
   try {
     const resp = await apiRaw('/api/config');
     etag = resp.headers.get('ETag');
@@ -101,11 +103,23 @@ function ctxOf(editable) {
   return { editable, onChange: markDirty, invalid };
 }
 
+function paintBackup() {
+  paintBackupCard(draft, {
+    editable: mode === 'edit',
+    onEnable() {
+      draft.backup = defaultBackup();
+      renderEdit();
+      markDirty();
+    },
+  });
+}
+
 function renderEdit() {
   const ctx = ctxOf(true);
   bindStatic(draft, ctx);
   renderModels(document.getElementById('models-body'), draft.models || (draft.models = {}), ctx);
   renderAgent(document.getElementById('agent-body'), draft.agent || {}, ctx);
+  paintBackup();
 }
 
 async function renderFallback() {
