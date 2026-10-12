@@ -3,6 +3,7 @@
 //! 组装入口是 [`build`]：按 [`ServerConfig`] 打开存储、构造模型池 / 工具池 /
 //! agent 系统 / 记忆器，返回可直接 `axum::serve` 的 [`Router`](axum::Router)。
 
+pub mod backup;
 pub mod config;
 pub mod core;
 pub mod mind;
@@ -157,7 +158,11 @@ async fn build_inner(
         }
         _ => None,
     };
-    let state = AppState::new(config, config_path, db, tasks, budget, agents, tools, memory, mind, sandbox, jwt);
+    let backup = backup::Backup::new(&conn, &config.storage.namespace, &config.storage.database, config.backup.clone())
+        .await
+        .map_err(|e| fail("storage", e))?;
+    backup.spawn_daily();
+    let state = AppState::new(config, config_path, db, tasks, budget, backup, agents, tools, memory, mind, sandbox, jwt);
     Ok(Built {
         router: routes::router(state.clone()),
         state,

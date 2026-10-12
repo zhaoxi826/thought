@@ -26,6 +26,9 @@ tokio-stream = { version = "0.1.19", features = ["sync"] }
 tower = { version = "0.5", features = ["util"] }
 tokio-tungstenite = "0.28.0"
 base64 = "0.22.1"
+aes-gcm = "0.10.3"
+hmac = "0.12.1"
+hex = "0.4.3"
 tower-http = { version = "0.6", features = ["fs"] }
 
 model = {path = "model"}

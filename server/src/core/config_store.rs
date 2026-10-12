@@ -57,6 +57,17 @@ fn preserve_secrets(new: &mut ServerConfig, old: &ServerConfig) {
     {
         n.api_key = o.api_key.clone();
     }
+    if let (Some(n), Some(o)) = (&mut new.backup, &old.backup) {
+        if n.passphrase.is_none() {
+            n.passphrase = o.passphrase.clone();
+        }
+        if n.s3.access_key.is_none() {
+            n.s3.access_key = o.s3.access_key.clone();
+        }
+        if n.s3.secret_key.is_none() {
+            n.s3.secret_key = o.s3.secret_key.clone();
+        }
+    }
 }
 
 fn changed<T: Serialize>(a: &T, b: &T) -> bool {
@@ -89,6 +100,9 @@ fn classify(new: &ServerConfig, old: &ServerConfig) -> (Vec<&'static str>, Vec<&
     }
     if changed(&new.browser, &old.browser) {
         restart.push("browser");
+    }
+    if changed(&new.backup, &old.backup) {
+        hot.push("backup");
     }
     // memory：只有 per_user / save_user_messages 热生效，其余需重启
     let mem_core = |c: &ServerConfig| {
@@ -170,6 +184,17 @@ pub fn apply(state: &AppState, if_match: Option<&str>, body: Json) -> Result<App
     {
         return Err(unprocessable(format!("memory.extractor_model: unknown model {name:?}")));
     }
+    if let Some(b) = &new.backup
+        && b.enabled
+    {
+        crate::backup::s3::S3::new(b.s3.clone()).map_err(unprocessable)?;
+        if b.daily_hour > 23 {
+            return Err(unprocessable("backup.daily_hour must be 0-23".into()));
+        }
+        if b.keep == 0 {
+            return Err(unprocessable("backup.keep must be at least 1".into()));
+        }
+    }
     // 构造一遍模型池与 agent 系统：模型引用、工具名、密钥可解析性都在这里校验
     let agents = crate::build_agents(&new, &state.inner.tools).map_err(|e| unprocessable(e.0))?;
 
@@ -186,6 +211,7 @@ pub fn apply(state: &AppState, if_match: Option<&str>, body: Json) -> Result<App
     *state.inner.agents.write().expect("agents lock poisoned") = agents;
     *state.inner.memory_cfg.write().expect("memory cfg lock poisoned") = new.memory.clone();
     state.inner.budget.set_config(new.budget.clone());
+    state.inner.backup.set_config(new.backup.clone());
     *current = new;
 
     Ok(ApplyResult {
@@ -247,6 +273,11 @@ fn restore_plain_secrets(text: &mut String, config: &ServerConfig) {
     }
     if let Some(e) = &config.embedding {
         set(&mut doc, &["embedding"], "api_key", &e.api_key);
+    }
+    if let Some(b) = &config.backup {
+        set(&mut doc, &["backup"], "passphrase", &b.passphrase);
+        set(&mut doc, &["backup", "s3"], "access_key", &b.s3.access_key);
+        set(&mut doc, &["backup", "s3"], "secret_key", &b.s3.secret_key);
     }
     if let Ok(t) = toml::to_string_pretty(&doc) {
         *text = t;

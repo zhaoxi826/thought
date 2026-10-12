@@ -47,6 +47,10 @@ pub struct ServerConfig {
     /// 她专属的浏览器（`browser_*` 工具）。缺省不启用。
     #[serde(default)]
     pub browser: Option<browser::BrowserConfig>,
+
+    /// 备份到 S3 兼容对象存储。缺省不备份。
+    #[serde(default)]
+    pub backup: Option<crate::backup::BackupConfig>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]

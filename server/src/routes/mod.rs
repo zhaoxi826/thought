@@ -18,6 +18,9 @@
 //! | GET | /api/mind/conversation[/events] | 你和她的对话 / 实时（SSE，连接期间算在线） |
 //! | GET | /api/mind/stream[/events] | 完整意识流（admin + X-Inner-Token；她会知道） |
 //! | GET | /api/mind/journal · /self · /audit | 日记、自我与成长、审计（admin + X-Inner-Token） |
+//! | GET | /api/backup | 备份状态与配置（admin，不含密钥） |
+//! | GET | /api/backup/list | 对象存储里的备份（admin） |
+//! | POST | /api/backup/run | 立即备份（admin；恢复走命令行 thought restore） |
 //! | GET | /api/tasks | 全局任务列表（含历史，游标分页） |
 //! | GET | /api/tasks/events | 全局任务事件流（SSE） |
 //! | GET | /api/tasks/{sid}/{tid} | 任务详情（含活动事件） |
@@ -33,6 +36,7 @@
 
 mod admin;
 mod auth;
+mod backup;
 mod memory;
 mod mind;
 mod sessions;
@@ -57,6 +61,9 @@ pub fn router(state: AppState) -> Router {
         .route("/api/models", get(admin::list_models))
         .route("/api/agents", get(admin::list_agents))
         .route("/api/config", get(admin::get_config).put(admin::put_config))
+        .route("/api/backup", get(backup::status))
+        .route("/api/backup/list", get(backup::list))
+        .route("/api/backup/run", post(backup::run))
         .route("/api/mind/budget", get(mind::budget))
         .route("/api/mind/budget/history", get(mind::budget_history))
         .route("/api/mind/pause", post(mind::pause))

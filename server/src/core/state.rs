@@ -30,6 +30,7 @@ pub(crate) struct Inner {
     pub db: Db,
     pub tasks: TaskRegistry,
     pub budget: Budget,
+    pub backup: crate::backup::Backup,
     /// 登录 / 二次鉴权失败限流。
     pub login_limiter: RateLimiter,
     /// 和她说话的频率限制（每人每分钟）。
@@ -91,6 +92,7 @@ impl AppState {
         db: Db,
         tasks: TaskRegistry,
         budget: Budget,
+        backup: crate::backup::Backup,
         agents: AgentSystem,
         tools: Registry,
         memory: Option<MemoryStore>,
@@ -103,6 +105,7 @@ impl AppState {
                 db,
                 tasks,
                 budget,
+                backup,
                 login_limiter: RateLimiter::new(5, std::time::Duration::from_secs(15 * 60)),
                 say_throttle: Throttle::new(SAY_PER_MINUTE, std::time::Duration::from_secs(60)),
                 agents: RwLock::new(agents),
