@@ -32,6 +32,7 @@ const SECTION_NAME = {
   http: '服务', storage: '存储', auth: '认证', embedding: '向量化', sandbox: '沙盒',
   mind: '心智', memory: '记忆', models: '模型池',
   'agent.controller': '主控', 'agent.workers': 'worker', 'agent.limits': '限额', budget: '预算',
+  backup: '备份', browser: '浏览器',
 };
 const secName = (s) => SECTION_NAME[s] || s;
 
@@ -40,6 +41,7 @@ export const SettingsPage = {
     document.getElementById('tab-form').addEventListener('click', () => switchView('form'));
     document.getElementById('tab-toml').addEventListener('click', () => switchView('toml'));
     document.getElementById('save-btn').addEventListener('click', save);
+    bindBackupRun((msg) => toastError(msg));
     // 可折叠子区（检索参数 / 出身 / 心跳 / 驱动）
     document.getElementById('form-view').addEventListener('click', (e) => {
       const head = e.target.closest('.subsec-head');
@@ -193,6 +195,7 @@ function noteFor(card) {
   if (mode === 'edit') {
     if (card === 'memory' && draft?.memory == null) return '未启用';
     if (card === 'mind' && draft?.mind == null) return '未启用';
+    if (card === 'backup' && draft?.backup == null) return '未配置';
     return '';
   }
   if (mode === 'nofile') {
