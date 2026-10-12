@@ -300,6 +300,9 @@ pub async fn restore(endpoint: &str, cfg: &BackupConfig, name: &str) -> Result<u
         db.use_ns(ns).use_db(name).await.map_err(|e| e.to_string())?;
         db.query(sql.as_str()).await.map_err(|e| format!("import {ns}/{name}: {e}"))?.check().map_err(|e| format!("import {ns}/{name}: {e}"))?;
     }
+    // 关闭连接并等后台引擎释放文件锁，之后服务才能打开这个库
+    drop(db);
+    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
     Ok(archive.databases.len())
 }
 
