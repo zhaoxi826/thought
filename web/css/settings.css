@@ -546,7 +546,7 @@
 }
 
 /* ---- 备份卡 ---- */
-.page-settings #backup-card .card-note { margin-top: 12px; }
+.page-settings #backup-card .card-note { margin-top: 12px; line-height: 1.7; }
 .page-settings #backup-card .card-note code {
   font-family: var(--mono);
   font-size: 11px;
@@ -563,8 +563,8 @@
   padding-top: 12px;
   border-top: 1px solid var(--line);
 }
-.page-settings .backup-state { flex: 1; font-size: 12px; color: var(--text-3); }
-.page-settings .backup-state.err { color: var(--red); }
+.page-settings .backup-state { flex: 1; font-size: 12px; color: var(--sub); }
+.page-settings .backup-state.err { color: var(--red-text); }
 .page-settings .backup-list { list-style: none; margin: 8px 0 0; padding: 0; max-height: 220px; overflow-y: auto; }
 .page-settings .backup-list li {
   display: grid;
@@ -577,7 +577,7 @@
 }
 .page-settings .backup-list li:last-child { border-bottom: none; }
 .page-settings .backup-list .when { color: var(--text); font-variant-numeric: tabular-nums; }
-.page-settings .backup-list .name { font-family: var(--mono); font-size: 11px; color: var(--text-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.page-settings .backup-list .size { font-variant-numeric: tabular-nums; color: var(--text-3); }
-.page-settings .backup-list .empty { display: block; color: var(--text-3); }
-.page-settings .backup-list .empty.err { color: var(--red); }
+.page-settings .backup-list .name { font-family: var(--mono); font-size: 11px; color: var(--faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.page-settings .backup-list .size { font-variant-numeric: tabular-nums; color: var(--faint); }
+.page-settings .backup-list .empty { display: block; color: var(--faint); }
+.page-settings .backup-list .empty.err { color: var(--red-text); }

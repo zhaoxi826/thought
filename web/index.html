@@ -584,6 +584,76 @@
             </div>
           </section>
 
+          <!-- 备份：S3 兼容对象存储；为 null 时显示「未配置」，管理员可点「启用」 -->
+          <section class="card" id="backup-card">
+            <div class="card-head">
+              <span class="card-title">备份</span>
+              <span class="card-tag">[backup]</span>
+              <span class="right pending-note" data-note="backup"></span>
+            </div>
+            <div class="card-note" id="backup-off" hidden>
+              尚未配置备份。<button type="button" class="add-model" id="backup-enable">+ 启用备份</button>
+            </div>
+            <div class="fields" id="backup-fields">
+              <div class="field">
+                <div class="switch-row">
+                  <span class="switch readonly" data-cfg-switch="backup.enabled"></span>
+                  <span class="sw-label">每日自动备份</span>
+                  <span class="sw-key">enabled</span>
+                </div>
+              </div>
+              <div class="field">
+                <label>每天几点<span class="key">daily_hour</span></label>
+                <input type="text" class="placeholder" placeholder="—" disabled data-cfg="backup.daily_hour" data-type="int" aria-label="每天几点 daily_hour">
+              </div>
+              <div class="field">
+                <label>保留份数<span class="key">keep</span></label>
+                <input type="text" class="placeholder" placeholder="—" disabled data-cfg="backup.keep" data-type="int" aria-label="保留份数 keep">
+              </div>
+              <div class="field">
+                <label>加密口令（环境变量）<span class="key">passphrase_env</span></label>
+                <input type="text" class="placeholder" placeholder="—" disabled data-cfg="backup.passphrase_env" data-nullable aria-label="加密口令 passphrase_env">
+              </div>
+              <div class="field span2">
+                <label>Endpoint<span class="key">s3.endpoint</span></label>
+                <input type="text" class="placeholder" placeholder="https://s3.us-east-1.amazonaws.com" disabled data-cfg="backup.s3.endpoint" aria-label="Endpoint s3.endpoint">
+              </div>
+              <div class="field">
+                <label>Region<span class="key">s3.region</span></label>
+                <input type="text" class="placeholder" placeholder="us-east-1" disabled data-cfg="backup.s3.region" aria-label="Region s3.region">
+              </div>
+              <div class="field">
+                <label>Bucket<span class="key">s3.bucket</span></label>
+                <input type="text" class="placeholder" placeholder="—" disabled data-cfg="backup.s3.bucket" aria-label="Bucket s3.bucket">
+              </div>
+              <div class="field">
+                <label>前缀<span class="key">s3.prefix</span></label>
+                <input type="text" class="placeholder" placeholder="thought/" disabled data-cfg="backup.s3.prefix" aria-label="前缀 s3.prefix">
+              </div>
+              <div class="field">
+                <div class="switch-row">
+                  <span class="switch readonly" data-cfg-switch="backup.s3.path_style"></span>
+                  <span class="sw-label">路径式寻址</span>
+                  <span class="sw-key">s3.path_style</span>
+                </div>
+              </div>
+              <div class="field">
+                <label>Access Key（环境变量）<span class="key">s3.access_key_env</span></label>
+                <input type="text" class="placeholder" placeholder="—" disabled data-cfg="backup.s3.access_key_env" data-nullable aria-label="Access Key s3.access_key_env">
+              </div>
+              <div class="field">
+                <label>Secret Key（环境变量）<span class="key">s3.secret_key_env</span></label>
+                <input type="text" class="placeholder" placeholder="—" disabled data-cfg="backup.s3.secret_key_env" data-nullable aria-label="Secret Key s3.secret_key_env">
+              </div>
+            </div>
+            <div class="backup-bar">
+              <span class="backup-state" id="backup-state" role="status" aria-live="polite">—</span>
+              <button type="button" class="add-model" id="backup-run">立即备份</button>
+            </div>
+            <ul class="backup-list" id="backup-list" aria-label="已有备份"></ul>
+            <div class="card-note">口令与密钥只从服务器的环境变量读取，不经过网页。恢复会覆盖全部数据，只能在命令行进行：<code>thought restore &lt;备份名&gt;</code>（先停服务）。</div>
+          </section>
+
         </div>
 
         <!-- 原始 TOML 视图 -->
