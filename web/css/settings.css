@@ -553,7 +553,7 @@
   padding: 1px 6px;
   border-radius: 4px;
   background: var(--panel-2);
-  color: var(--text-2);
+  color: var(--text);
 }
 .page-settings .backup-bar {
   display: flex;
@@ -576,7 +576,7 @@
   border-bottom: 1px dashed var(--line);
 }
 .page-settings .backup-list li:last-child { border-bottom: none; }
-.page-settings .backup-list .when { color: var(--text-2); font-variant-numeric: tabular-nums; }
+.page-settings .backup-list .when { color: var(--text); font-variant-numeric: tabular-nums; }
 .page-settings .backup-list .name { font-family: var(--mono); font-size: 11px; color: var(--text-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .page-settings .backup-list .size { font-variant-numeric: tabular-nums; color: var(--text-3); }
 .page-settings .backup-list .empty { display: block; color: var(--text-3); }
